@@ -194,6 +194,37 @@ $$;
 revoke all on function public.get_public_profile_by_infinitas_id(text) from public;
 grant execute on function public.get_public_profile_by_infinitas_id(text) to authenticated;
 
+create or replace function public.get_public_profile_by_dj_name(p_dj_name text)
+returns table (
+  auth_user_id uuid,
+  infinitas_id text,
+  dj_name text,
+  google_email text,
+  icon_data_url text,
+  share_data_scope jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    u.auth_user_id,
+    u.infinitas_id,
+    u.dj_name,
+    u.google_email,
+    u.icon_data_url,
+    coalesce(a.social_settings->'shareDataScope', '["graphs","goals"]'::jsonb) as share_data_scope
+  from public.users u
+  left join public.account_states a on a.auth_user_id = u.auth_user_id
+  where lower(trim(coalesce(u.dj_name, ''))) = lower(trim(coalesce(p_dj_name, '')))
+    and coalesce(a.social_settings->>'discoverByDjName', 'true') = 'true'
+    and coalesce(a.social_settings->>'discoverability', 'searchable') = 'searchable'
+  limit 20;
+$$;
+
+revoke all on function public.get_public_profile_by_dj_name(text) from public;
+grant execute on function public.get_public_profile_by_dj_name(text) to authenticated;
+
 create or replace function public.get_song_social_context(
   p_title text,
   p_chart_type text
@@ -298,9 +329,7 @@ as $$
       )
     ) as can_challenge
   from peer_rows pr
-  where
-    pr.kind = 'rival'
-    or coalesce(pr.social_settings->'shareDataScope', '[]'::jsonb) ? 'all';
+  where pr.kind in ('follow', 'rival');
 $$;
 
 revoke all on function public.get_song_social_context(text, text) from public;
@@ -528,6 +557,85 @@ $$;
 
 revoke all on function public.get_social_overview() from public;
 grant execute on function public.get_social_overview() to authenticated;
+
+create or replace function public.send_goal_bundle_to_user(
+  p_target_user_id uuid,
+  p_goals jsonb,
+  p_sender_dj_name text default '',
+  p_sender_infinitas_id text default ''
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_share_scope jsonb;
+  v_count int := 0;
+  v_norm_goals jsonb := '[]'::jsonb;
+  v_source text := coalesce(nullif(trim(p_sender_dj_name), ''), '팔로우 목표 전송');
+begin
+  if auth.uid() is null then
+    raise exception 'not_authenticated';
+  end if;
+  if p_target_user_id is null then
+    raise exception 'invalid_target';
+  end if;
+  if auth.uid() = p_target_user_id then
+    raise exception 'cannot_send_to_self';
+  end if;
+  if not exists (
+    select 1
+    from public.follows f
+    where f.follower_user_id = auth.uid()
+      and f.following_user_id = p_target_user_id
+  ) then
+    raise exception 'target_not_following';
+  end if;
+
+  select coalesce(a.social_settings->'shareDataScope', '[]'::jsonb)
+  into v_share_scope
+  from public.account_states a
+  where a.auth_user_id = p_target_user_id;
+
+  if not (
+    coalesce(v_share_scope, '[]'::jsonb) ? 'all'
+    or coalesce(v_share_scope, '[]'::jsonb) ? 'goals'
+  ) then
+    raise exception 'target_goal_share_disabled';
+  end if;
+
+  select coalesce(jsonb_agg(
+    jsonb_set(
+      jsonb_set(g, '{id}', to_jsonb(gen_random_uuid()::text), true),
+      '{source}',
+      to_jsonb(v_source || case when nullif(trim(p_sender_infinitas_id), '') is null then '' else ' (' || trim(p_sender_infinitas_id) || ')' end),
+      true
+    )
+  ), '[]'::jsonb)
+  into v_norm_goals
+  from jsonb_array_elements(coalesce(p_goals, '[]'::jsonb)) g
+  where coalesce(g->>'title', '') <> '';
+
+  v_count := jsonb_array_length(coalesce(v_norm_goals, '[]'::jsonb));
+  if v_count <= 0 then
+    return 0;
+  end if;
+
+  insert into public.account_states (auth_user_id, account_id, goals, social_settings, updated_at, update_reason)
+  values (p_target_user_id, gen_random_uuid()::text, v_norm_goals, '{}'::jsonb, now(), 'goal-transfer')
+  on conflict (auth_user_id)
+  do update set
+    goals = coalesce(public.account_states.goals, '[]'::jsonb) || v_norm_goals,
+    updated_at = now(),
+    update_reason = 'goal-transfer';
+
+  return v_count;
+end;
+$$;
+
+revoke all on function public.send_goal_bundle_to_user(uuid, jsonb, text, text) from public;
+grant execute on function public.send_goal_bundle_to_user(uuid, jsonb, text, text) to authenticated;
 
 create or replace function public.send_challenge(
   p_receiver_user_id uuid,

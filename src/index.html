@@ -48,7 +48,12 @@
           </div>
           <div class="account-hero-meta">
             <div id="accountHeroName" class="account-hero-name">DJ NAME</div>
-            <div id="accountHeroId" class="account-hero-id">C-0000-0000-0000</div>
+            <div class="account-hero-subline">
+              <div id="accountHeroId" class="account-hero-id">C-0000-0000-0000</div>
+              <div id="accountGoogleBadge" class="account-google-badge hidden" title="Google 미연동">
+                <img src="../assets/icon/google.png" alt="Google linked" />
+              </div>
+            </div>
           </div>
           <div class="account-medals" id="accountMedals">
             <div class="medal-slot">
@@ -193,21 +198,46 @@
       </section>
 
       <section id="panel-social" class="panel tab-panel">
-        <div class="goals-header">
-          <h3>소셜</h3>
+        <div class="social-layout">
+          <aside class="social-col social-col-left">
+            <div id="socialMyCard" class="social-card"></div>
+            <div class="social-card">
+              <div class="social-card-title">팔로우 요청</div>
+              <div id="socialFollowRequests" class="social-requests"></div>
+            </div>
+          </aside>
+          <main class="social-col social-col-center">
+            <div class="social-card">
+              <div class="social-card-title">피드</div>
+              <div id="socialFeed" class="social-feed"></div>
+            </div>
+          </main>
+          <aside class="social-col social-col-right">
+            <div class="social-card">
+              <div class="social-card-title">팔로우 목록</div>
+              <div id="socialFollowList" class="social-follow-list"></div>
+            </div>
+          </aside>
         </div>
-        <div class="goal-form">
-          <input id="socialSearchInfinitasId" placeholder="C-XXXX-XXXX-XXXX로 검색" />
-          <button id="btnSocialSearchUser" type="button">검색</button>
-          <button id="btnSocialSendFollowRequest" type="button">팔로우 요청</button>
-          <button id="btnSocialAddRival" type="button">라이벌 등록</button>
-          <button id="btnSocialCompare" type="button">비교 보기</button>
-        </div>
-        <div id="socialSearchResult" class="help-body"></div>
-        <div class="history-layout">
-          <div id="socialFollowRequests" class="history-list history-list-left"></div>
-          <div id="socialSummary" class="history-detail"></div>
-        </div>
+        <input id="socialBannerInput" type="file" accept="image/*" class="hidden" />
+        <dialog id="socialFollowAddDialog" class="account-dialog">
+          <form method="dialog" id="socialFollowAddForm">
+            <h3>팔로우 추가</h3>
+            <label class="field-label" for="socialSearchDjName">DJ NAME으로 검색</label>
+            <input id="socialSearchDjName" placeholder="DJ NAME 입력" />
+            <label class="field-label" for="socialSearchInfinitasId">INFINITAS ID로 검색</label>
+            <input id="socialSearchInfinitasId" placeholder="C-XXXX-XXXX-XXXX" />
+            <div id="socialSearchResult" class="social-search-result">검색 대기 중</div>
+            <div class="social-action-row">
+              <button id="btnSocialSearchUser" type="button">검색</button>
+              <button id="btnSocialSendFollowRequest" type="button">팔로우 요청</button>
+              <button id="btnSocialSendGoals" type="button">목표 전송</button>
+            </div>
+            <div class="dialog-actions">
+              <button type="submit">닫기</button>
+            </div>
+          </form>
+        </dialog>
       </section>
 
     </div>
@@ -381,122 +411,124 @@
     <dialog id="settingsDialog" class="account-dialog">
       <form method="dialog" id="settingsForm">
         <h3>설정</h3>
-        <div class="settings-list">
-          <div class="settings-divider"><span>-일반-</span></div>
-          <label class="settings-item">
-            <span class="setting-check">
-              <input id="settingShowUpdateGoalCards" type="checkbox" checked />
-              <span class="setting-check-ui"></span>
-            </span>
-            <span>갱신 시 목표 카드 리스트 표시</span>
-          </label>
-          <label class="settings-item">
-            <span class="setting-check">
-              <input id="settingEnableHistoryRollback" type="checkbox" checked />
-              <span class="setting-check-ui"></span>
-            </span>
-            <span>히스토리 롤백 기능 사용</span>
-          </label>
+        <div class="settings-shell">
+          <aside class="settings-nav">
+            <button type="button" id="settingsTabGeneral" class="settings-nav-btn active" data-settings-tab="general">일반</button>
+            <button type="button" id="settingsTabSocial" class="settings-nav-btn" data-settings-tab="social">소셜</button>
+            <button type="button" id="settingsTabVersion" class="settings-nav-btn" data-settings-tab="version">버전정보</button>
+          </aside>
+          <section class="settings-content">
+            <div class="settings-panel-content active" data-settings-panel="general">
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingShowUpdateGoalCards" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>갱신 시 목표 카드 리스트 표시</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingEnableHistoryRollback" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>히스토리 롤백 기능 사용</span>
+              </label>
+            </div>
 
-          <div id="socialSettingsBlock">
-            <div class="settings-divider"><span>-소셜-</span></div>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingDiscoverability" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>Infinitas ID로 검색 허용</span>
-            </label>
-            <div class="field-label">팔로우 가능 여부</div>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingFollowPolicyManual" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>허가 필요</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingFollowPolicyAuto" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>자동 허가</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingFollowPolicyDisabled" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>불가</span>
-            </label>
-            <div class="field-label">팔로우 공유 데이터</div>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingShareAllData" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>모든 데이터</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingShareGraphs" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>그래프</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingShareGoals" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>목표 리스트</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingShareHistory" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>히스토리</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingShareNone" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>불가</span>
-            </label>
-            <div class="field-label">라이벌 설정 가능 여부</div>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingRivalPolicyFollowers" type="checkbox" checked />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>팔로우만</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingRivalPolicyAll" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>모두</span>
-            </label>
-            <label class="settings-item">
-              <span class="setting-check">
-                <input id="settingRivalPolicyDisabled" type="checkbox" />
-                <span class="setting-check-ui"></span>
-              </span>
-              <span>불가</span>
-            </label>
-          </div>
-          <div class="auth-link-block">
+            <div id="socialSettingsBlock" class="settings-panel-content" data-settings-panel="social">
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingDiscoverability" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>Infinitas ID로 검색 허용</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingDiscoverabilityDjName" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>DJ NAME으로 검색 허용</span>
+              </label>
+
+              <div class="settings-subtitle">팔로우 가능 여부</div>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingFollowPolicyManual" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>허가 필요</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingFollowPolicyAuto" type="checkbox" />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>자동 허가</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingFollowPolicyDisabled" type="checkbox" />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>불가</span>
+              </label>
+
+              <div class="settings-subtitle">팔로우 공유 데이터</div>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingShareAllData" type="checkbox" />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>모든 데이터</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingShareGraphs" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>그래프</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingShareGoals" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>목표 리스트</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingShareNone" type="checkbox" />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>불가</span>
+              </label>
+            </div>
+
+            <div class="settings-panel-content" data-settings-panel="version">
+              <div class="settings-version-card settings-version-card-maker">
+                <div><strong>INFINITAS Table Maker</strong></div>
+                <div>Version: 1.0.8</div>
+              </div>
+              <div class="settings-version-card settings-version-card-reflux">
+                <div><strong>Reflux</strong></div>
+                <div>Version: 1.16.2</div>
+                <div>GitHub: <a href="https://github.com/olji/Reflux" target="_blank" rel="noreferrer">https://github.com/olji/Reflux</a></div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div class="dialog-actions settings-dialog-actions">
+          <div class="settings-actions-left settings-google-fixed auth-link-block">
             <button id="btnGoogleLink" type="button" class="google-link-btn" title="Google 연동">
               <img src="../assets/icon/google.png" alt="Google" />
             </button>
             <div id="googleAuthStatus" class="google-auth-status">Google 미연동</div>
           </div>
-        </div>
-        <div class="dialog-actions">
-          <button id="settingsCloseBtn" type="submit">닫기</button>
+          <div class="settings-actions-right">
+            <button id="btnGoogleUnlink" type="button" class="danger">구글 연동 해제</button>
+            <button id="settingsCloseBtn" type="submit">닫기</button>
+          </div>
         </div>
       </form>
     </dialog>
