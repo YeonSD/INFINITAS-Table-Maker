@@ -829,20 +829,7 @@ function syncSlidingControls() {
 }
 
 function bindRippleButtons() {
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.ui-btn');
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
-    const size = Math.max(rect.width, rect.height);
-    const dot = document.createElement('span');
-    dot.className = 'btn-ripple-dot';
-    dot.style.width = `${size}px`;
-    dot.style.height = `${size}px`;
-    dot.style.left = `${e.clientX - rect.left - size / 2}px`;
-    dot.style.top = `${e.clientY - rect.top - size / 2}px`;
-    btn.appendChild(dot);
-    setTimeout(() => dot.remove(), 620);
-  });
+  // intentionally disabled: no click ripple motion
 }
 
 function toast(msg, type = 'info') {

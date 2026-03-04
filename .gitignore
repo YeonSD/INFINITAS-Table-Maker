@@ -2,4 +2,5 @@
 dist/
 dist-portable/
 .tmp_reflux/
+Reflux.1.16.2/
 *.log
