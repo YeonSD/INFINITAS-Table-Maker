@@ -776,7 +776,10 @@ function decorateButtons(root = document) {
       btn.classList.contains('it-select-btn') ||
       btn.classList.contains('it-search-toggle') ||
       btn.classList.contains('history-item') ||
-      btn.classList.contains('history-accordion-btn')
+      btn.classList.contains('history-accordion-btn') ||
+      btn.hasAttribute('data-table') ||
+      btn.hasAttribute('data-view') ||
+      btn.hasAttribute('data-sort')
     ) return;
     btn.classList.add('ui-btn');
     if (btn.id === 'btnExportImage') {
@@ -793,10 +796,8 @@ function measureSlidingGroup(root, itemSelector) {
   const items = [...root.querySelectorAll(itemSelector)];
   if (!items.length) return;
   const active = items.find((x) => x.classList.contains('active')) || items[0];
-  const rootRect = root.getBoundingClientRect();
-  const activeRect = active.getBoundingClientRect();
-  const left = Math.max(0, activeRect.left - rootRect.left);
-  const width = Math.max(0, activeRect.width);
+  const left = Math.max(0, active.offsetLeft);
+  const width = Math.max(0, active.offsetWidth);
   root.style.setProperty('--slide-left', `${left.toFixed(2)}px`);
   root.style.setProperty('--slide-width', `${width.toFixed(2)}px`);
 }
@@ -1404,10 +1405,24 @@ function renderRankTable(){
   $('tableTitle').textContent=normalizeRankTitle(view.title);
   const q=$('songSearch').value.trim().toLowerCase();
   const cols=state.viewMode==='wide'?8:6;
+  const isUncategorized = (name) => /미정|미분류/i.test(String(name || '').trim());
+  const sp10OrderValue = (name) => {
+    const n = Number(String(name || '').trim());
+    return Number.isFinite(n) ? n : null;
+  };
   const orderedCategories = [...(view.categories || [])].sort((a, b) => {
-    const aLast = (a?.name || '') === '미정' ? 1 : 0;
-    const bLast = (b?.name || '') === '미정' ? 1 : 0;
+    const aName = a?.name || '';
+    const bName = b?.name || '';
+    const aLast = isUncategorized(aName) ? 1 : 0;
+    const bLast = isUncategorized(bName) ? 1 : 0;
     if (aLast !== bLast) return aLast - bLast;
+    if (state.activeTable === 'SP10H') {
+      const an = sp10OrderValue(aName);
+      const bn = sp10OrderValue(bName);
+      if (an !== null && bn !== null && an !== bn) return bn - an;
+      if (an !== null && bn === null) return -1;
+      if (an === null && bn !== null) return 1;
+    }
     return Number(a?.sortindex || 0) - Number(b?.sortindex || 0);
   });
   container.innerHTML=orderedCategories.map((cat)=>{
