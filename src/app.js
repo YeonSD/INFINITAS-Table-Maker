@@ -20,13 +20,22 @@ const MAX_ACCOUNTS = 5;
 const DEFAULT_ICON_SRC = '../assets/icon/infinitas.png';
 const SOCIAL_SHARE_SCOPE_VALUES = ['all', 'graphs', 'goals', 'none'];
 const FOLLOW_LIMIT = 8;
-const RIVAL_LIMIT = 4;
 const RADAR_ORDER = ['NOTES', 'PEAK', 'SCRATCH', 'SOFLAN', 'CHARGE', 'CHORD'];
+const DJ_NAME_MIN_LEN = 2;
+const DJ_NAME_MAX_LEN = 16;
+const IMAGE_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const ICON_MAX_BYTES = 2 * 1024 * 1024;
+const ICON_MAX_WIDTH = 512;
+const ICON_MAX_HEIGHT = 512;
+const BANNER_MAX_BYTES = 4 * 1024 * 1024;
+const BANNER_MAX_WIDTH = 1920;
+const BANNER_MAX_HEIGHT = 1080;
 const DEFAULT_SOCIAL_SETTINGS = Object.freeze({
   discoverability: 'searchable',
   discoverByDjName: true,
   followPolicy: 'manual',
   shareDataScope: ['graphs', 'goals'],
+  goalTransferEnabled: true,
   rivalPolicy: 'followers'
 });
 
@@ -60,6 +69,7 @@ const state = {
     discoverByDjName: DEFAULT_SOCIAL_SETTINGS.discoverByDjName,
     followPolicy: DEFAULT_SOCIAL_SETTINGS.followPolicy,
     shareDataScope: [...DEFAULT_SOCIAL_SETTINGS.shareDataScope],
+    goalTransferEnabled: DEFAULT_SOCIAL_SETTINGS.goalTransferEnabled,
     rivalPolicy: DEFAULT_SOCIAL_SETTINGS.rivalPolicy
   },
   goalSongQuery: '',
@@ -80,6 +90,9 @@ let socialSearchTarget = null;
 let socialOverviewRows = [];
 let socialProfileMap = new Map();
 let socialRelationStats = { following: 0, followers: 0 };
+let socialFollowersRows = [];
+let socialFeedItems = [];
+let socialRenderCache = { my: '', feed: '', list: '', title: '' };
 
 const $ = (id) => document.getElementById(id);
 const authContext = (() => {
@@ -644,6 +657,7 @@ async function syncLinkedAccountToCloud(reason = 'manual') {
       discoverByDjName: state.settings.discoverByDjName,
       followPolicy: state.settings.followPolicy,
       shareDataScope: normalizeShareDataScope(state.settings.shareDataScope),
+      goalTransferEnabled: state.settings.goalTransferEnabled !== false,
       rivalPolicy: state.settings.rivalPolicy
     },
     updated_at: new Date().toISOString(),
@@ -967,6 +981,7 @@ function normalizeSettings(s) {
     discoverByDjName: src.discoverByDjName !== false,
     followPolicy: ['auto', 'manual', 'disabled'].includes(src.followPolicy) ? src.followPolicy : 'manual',
     shareDataScope: normalizeShareDataScope(src.shareDataScope),
+    goalTransferEnabled: src.goalTransferEnabled !== false,
     rivalPolicy: ['all', 'followers', 'disabled'].includes(src.rivalPolicy) ? src.rivalPolicy : 'followers'
   };
 }
@@ -978,6 +993,7 @@ function normalizeSocialSettings(s) {
     discoverByDjName: n.discoverByDjName,
     followPolicy: n.followPolicy,
     shareDataScope: normalizeShareDataScope(n.shareDataScope),
+    goalTransferEnabled: n.goalTransferEnabled !== false,
     rivalPolicy: n.rivalPolicy
   };
 }
@@ -1732,6 +1748,7 @@ function renderSettings() {
   $('settingShareGraphs').checked = picked.has('graphs');
   $('settingShareGoals').checked = picked.has('goals');
   $('settingShareNone').checked = picked.has('none');
+  $('settingGoalTransferEnabled').checked = state.settings.goalTransferEnabled !== false;
   setSettingsTab(state.settingsTab || 'general');
   renderAuthStatus();
 }
@@ -1800,6 +1817,8 @@ async function refreshSocialOverview() {
     socialOverviewRows = [];
     socialProfileMap = new Map();
     socialRelationStats = { following: 0, followers: 0 };
+    socialFollowersRows = [];
+    socialFeedItems = [];
     renderSocialPanel();
     return;
   }
@@ -1809,37 +1828,251 @@ async function refreshSocialOverview() {
     socialOverviewRows = [];
     socialProfileMap = new Map();
     socialRelationStats = { following: 0, followers: 0 };
+    socialFollowersRows = [];
+    socialFeedItems = [];
   } else {
     socialOverviewRows = Array.isArray(data) ? data : [];
-    const peerIds = [...new Set(socialOverviewRows.map((r) => String(r.peer_user_id || '')).filter(Boolean))];
-    socialProfileMap = new Map();
-    if (peerIds.length) {
-      const { data: usersData } = await client
-        .from('users')
-        .select('auth_user_id, icon_data_url')
-        .in('auth_user_id', peerIds);
-      (Array.isArray(usersData) ? usersData : []).forEach((row) => {
-        socialProfileMap.set(String(row.auth_user_id || ''), {
-          icon: typeof row.icon_data_url === 'string' ? row.icon_data_url : ''
-        });
-      });
+    const listRes = await client.rpc('get_follow_lists');
+    if (!listRes.error && Array.isArray(listRes.data)) {
+      const normalized = listRes.data.map((r) => ({
+        relation_type: 'follow',
+        request_id: null,
+        peer_user_id: r.peer_user_id,
+        dj_name: r.dj_name,
+        infinitas_id: r.infinitas_id,
+        status: 'accepted',
+        created_at: r.created_at,
+        direction: r.direction,
+        icon_data_url: r.icon_data_url || ''
+      }));
+      socialOverviewRows = [
+        ...socialOverviewRows.filter((r) => r.relation_type !== 'follow'),
+        ...normalized
+      ];
     }
-    const [followingRes, followersRes] = await Promise.all([
-      client.from('follows').select('id', { count: 'exact', head: true }).eq('follower_user_id', uid),
-      client.from('follows').select('id', { count: 'exact', head: true }).eq('following_user_id', uid)
-    ]);
+    socialProfileMap = new Map(
+      socialOverviewRows
+        .filter((r) => r.relation_type === 'follow')
+        .map((r) => [String(r.peer_user_id || ''), { icon: typeof r.icon_data_url === 'string' ? r.icon_data_url : '' }])
+    );
+    const followsAll = socialOverviewRows.filter((r) => r.relation_type === 'follow');
+    const followingRows = followsAll.filter((r) => (r.direction || 'following') === 'following');
+    const followerRows = followsAll.filter((r) => (r.direction || 'following') === 'follower');
+    socialFollowersRows = followerRows;
     socialRelationStats = {
-      following: Number(followingRes?.count || 0),
-      followers: Number(followersRes?.count || 0)
+      following: followingRows.length,
+      followers: followerRows.length
     };
+    if (!followingRows.length && !followerRows.length) {
+      const fallbackCount = followsAll.length;
+      socialRelationStats = { following: fallbackCount, followers: fallbackCount };
+    }
+    await loadSocialFeedEvents(client);
   }
   renderSocialPanel();
+}
+
+function feedEventToItem(row) {
+  const type = String(row?.event_type || '');
+  const payload = row?.payload && typeof row.payload === 'object' ? row.payload : {};
+  const actorName = String(row?.actor_dj_name || 'UNKNOWN');
+  const actorId = String(row?.actor_infinitas_id || '');
+  const actorLabel = actorId ? `${actorName} (${actorId})` : actorName;
+  if (type === 'follow_request_received') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '팔로우 요청 도착',
+      body: `${actorLabel} 님이 나에게 팔로우 요청을 보냈습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'follow_request_accepted') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '팔로우 요청 승인',
+      body: `${actorLabel} 님이 내가 보낸 팔로우 요청을 승인했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'follower_unfollowed') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '팔로워의 팔로우 취소',
+      body: `${actorLabel} 님이 나를 언팔로우했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'follow_history_updated') {
+    const summary = String(payload.summary || '').trim();
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '팔로우 히스토리 갱신',
+      body: summary ? `${actorLabel} · ${summary}` : `${actorLabel} 님이 히스토리를 갱신했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'goal_transfer_updated') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '팔로우가 목표를 갱신',
+      body: `${actorLabel} 님이 내가 보낸 목표를 갱신했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'goal_transfer_accepted') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '보낸 목표 승인됨',
+      body: `${actorLabel} 님이 내가 보낸 목표를 승인했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  if (type === 'goal_transfer_received') {
+    return {
+      type,
+      id: String(row.id || ''),
+      title: '목표 전송 요청 도착',
+      body: `${actorLabel} 님이 목표 전송을 요청했습니다.`,
+      created_at: row.created_at || nowIso(),
+      peer_user_id: row.actor_user_id || '',
+      icon_data_url: row.actor_icon_data_url || '',
+      payload
+    };
+  }
+  return null;
+}
+
+async function loadSocialFeedEvents(client) {
+  if (!client) {
+    socialFeedItems = [];
+    return;
+  }
+  const { data, error } = await client.rpc('get_feed_events', { p_limit: 120 });
+  if (error) {
+    console.warn('[feed-events]', error.message || error);
+    socialFeedItems = [];
+    return;
+  }
+  socialFeedItems = (Array.isArray(data) ? data : [])
+    .map(feedEventToItem)
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
+}
+
+function feedTypeLabel(type) {
+  if (type === 'follow_request_received') return '요청';
+  if (type === 'follow_request_accepted') return '승인';
+  if (type === 'follower_unfollowed') return '취소';
+  if (type === 'follow_history_updated') return '히스토리';
+  if (type === 'goal_transfer_updated') return '목표 갱신';
+  if (type === 'goal_transfer_accepted') return '목표 승인';
+  if (type === 'goal_transfer_received') return '목표 요청';
+  return '알림';
+}
+
+function feedTypeClass(type) {
+  if (type === 'follow_request_received') return 'feed-request-in';
+  if (type === 'follow_request_accepted') return 'feed-request-ok';
+  if (type === 'follower_unfollowed') return 'feed-unfollow';
+  if (type === 'follow_history_updated') return 'feed-history';
+  if (type === 'goal_transfer_updated') return 'feed-goal-updated';
+  if (type === 'goal_transfer_accepted') return 'feed-goal-approved';
+  if (type === 'goal_transfer_received') return 'feed-goal-received';
+  return 'feed-default';
+}
+
+function dismissFeedItem(feedId) {
+  const id = String(feedId || '');
+  if (!id) return;
+  const client = getSupabaseClient();
+  if (client) {
+    client.rpc('dismiss_feed_event', { p_event_id: id }).catch(() => {});
+  }
+  socialFeedItems = (socialFeedItems || []).filter((x) => x.id !== id);
+  renderSocialPanel();
+}
+
+function dismissAllFeedItems() {
+  const client = getSupabaseClient();
+  if (client) {
+    client.rpc('dismiss_all_feed_events').catch(() => {});
+  }
+  socialFeedItems = [];
+  renderSocialPanel();
+}
+
+function closeFollowersPopup() {
+  $('socialFollowersPopup')?.classList.add('hidden');
+}
+
+function openFollowersPopupAt(clientX, clientY, followerRows) {
+  const popup = $('socialFollowersPopup');
+  if (!popup) return;
+  const list = Array.isArray(followerRows) ? followerRows : [];
+  popup.innerHTML = list.length
+    ? list.map((row) => {
+      const pid = String(row.peer_user_id || '');
+      const profile = socialProfileMap.get(pid) || {};
+      const hasIcon = !!String(profile.icon || '').trim();
+      return `
+        <div class="social-follow-user">
+          <div class="social-avatar social-avatar-plain">
+            ${hasIcon
+              ? `<img src="${esc(profile.icon)}" alt="${esc(row.dj_name || 'user')}" />`
+              : '<span class="social-avatar-person">👤</span>'}
+          </div>
+          <div>
+            <div class="social-follow-name">${esc(row.dj_name || 'UNKNOWN')}</div>
+            <div class="social-item-sub">${esc(row.infinitas_id || '')}</div>
+          </div>
+          <button type="button" class="social-follow-back" data-follow-back="${esc(pid)}">+</button>
+        </div>
+      `;
+    }).join('')
+    : '<div class="history-empty">팔로워 목록이 없습니다.</div>';
+  popup.classList.remove('hidden');
+  const margin = 10;
+  const rect = popup.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  const left = Math.min(Math.max(margin, clientX + 8), maxLeft);
+  const top = Math.min(Math.max(margin, clientY + 8), maxTop);
+  popup.style.left = `${left}px`;
+  popup.style.top = `${top}px`;
 }
 
 async function sendGoalsToSelectedUser() {
   const acc = activeAcc();
   if (!acc?.googleAuthUserId) {
     toast('Google 연동 계정에서만 가능합니다.', 'warning');
+    return;
+  }
+  if (state.settings.goalTransferEnabled === false) {
+    toast('설정에서 목표 전송 허용을 켜야 전송할 수 있습니다.', 'warning');
     return;
   }
   if (!socialSearchTarget?.auth_user_id) {
@@ -1882,34 +2115,52 @@ async function sendGoalsToSelectedUser() {
       toast('목표 전송 RPC가 아직 DB에 적용되지 않았습니다. schema.sql을 반영해주세요.', 'error');
       return;
     }
+    if (msg.includes('sender_goal_transfer_disabled')) {
+      toast('내 소셜 설정에서 목표 전송이 비활성화되어 있습니다.', 'warning');
+      return;
+    }
+    if (msg.includes('target_goal_transfer_disabled')) {
+      toast('상대 소셜 설정에서 목표 전송을 허용하지 않았습니다.', 'warning');
+      return;
+    }
+    if (msg.includes('mutual_follow_required')) {
+      toast('목표 전송은 서로 팔로우 상태에서만 가능합니다.', 'warning');
+      return;
+    }
     throw error;
   }
   const count = Number(data || 0);
-  toast(`목표 ${count}개를 전송했습니다.`, 'success');
+  toast(`목표 ${count}개 전송 요청을 보냈습니다. 상대가 승인하면 반영됩니다.`, 'success');
 }
 
 function renderSocialPanel() {
   const acc = activeAcc();
   const myCard = $('socialMyCard');
-  const requests = $('socialFollowRequests');
   const feed = $('socialFeed');
   const followList = $('socialFollowList');
-  if (!myCard || !requests || !feed || !followList) return;
+  const followListTitle = $('socialFollowListTitle');
+  const clearAllBtn = $('btnSocialFeedClearAll');
+  if (!myCard || !feed || !followList) return;
   const linked = !!acc?.googleAuthUserId;
   const settings = acc?.socialSettings || {
     discoverability: state.settings.discoverability,
     discoverByDjName: state.settings.discoverByDjName,
     followPolicy: state.settings.followPolicy,
-    shareDataScope: normalizeShareDataScope(state.settings.shareDataScope)
+    shareDataScope: normalizeShareDataScope(state.settings.shareDataScope),
+    goalTransferEnabled: state.settings.goalTransferEnabled !== false
   };
   const rows = socialOverviewRows || [];
-  const incomingPending = rows.filter((r) => r.relation_type === 'request_in' && r.status === 'pending');
-  const outgoingPending = rows.filter((r) => r.relation_type === 'request_out' && r.status === 'pending');
-  const follows = rows.filter((r) => r.relation_type === 'follow');
+  const followsAll = rows.filter((r) => r.relation_type === 'follow');
+  const followingRows = followsAll.filter((r) => (r.direction || 'following') === 'following');
+  const followerRows = socialFollowersRows.length ? socialFollowersRows : followsAll.filter((r) => (r.direction || 'following') === 'follower');
+  if (followListTitle && socialRenderCache.title !== '팔로우 목록') {
+    followListTitle.textContent = '팔로우 목록';
+    socialRenderCache.title = '팔로우 목록';
+  }
   const radarProfile = computePlayerRadarProfile();
   const totalRadar = Number(radarProfile.total || 0).toFixed(2);
   const banner = acc?.socialBannerDataUrl || iconSrc(acc);
-  myCard.innerHTML = linked
+  const myMarkup = linked
     ? `<article class="social-me-card">
         <div class="social-me-banner" style="background-image:url('${esc(banner)}')">
           <button id="btnSocialBannerSetting" type="button" class="social-me-banner-setting" title="배경 이미지 변경">⚙</button>
@@ -1921,54 +2172,51 @@ function renderSocialPanel() {
           <div class="social-me-name">${esc(acc.djName)}</div>
           <div class="social-me-id">${esc(acc.infinitasId)}</div>
           <div class="social-me-stats">
-            <div class="social-me-stat"><div class="social-me-stat-value">${esc(totalRadar)}</div><div class="social-me-stat-label">TOTAL RADAR SCORE</div></div>
-            <div class="social-me-stat"><div class="social-me-stat-value">${socialRelationStats.following}</div><div class="social-me-stat-label">팔로우</div></div>
-            <div class="social-me-stat"><div class="social-me-stat-value">${socialRelationStats.followers}</div><div class="social-me-stat-label">팔로워</div></div>
+            <div class="social-me-stat"><div class="social-me-stat-value">${esc(totalRadar)}</div><div class="social-me-stat-label">RADAR</div></div>
+            <div class="social-me-stat"><div class="social-me-stat-value">${socialRelationStats.following}/${FOLLOW_LIMIT}</div><div class="social-me-stat-label">팔로우</div></div>
+            <button type="button" class="social-me-stat social-me-stat-btn" data-open-followers="1"><div class="social-me-stat-value">${socialRelationStats.followers}</div><div class="social-me-stat-label">팔로워</div></button>
           </div>
           <button id="btnSocialOpenFollowAdd" type="button" class="social-follow-add-btn" title="팔로우 추가"><span class="social-follow-add-icon">+</span><span class="social-follow-add-text">팔로우 추가</span></button>
           <div class="social-me-footnote">검색 공개: ${settings.discoverability === 'searchable' ? '가능' : '불가'} / DJ NAME 검색: ${settings.discoverByDjName !== false ? '가능' : '불가'}</div>
         </div>
       </article>`
     : '<div class="social-item">Google 연동 계정에서 소셜 기능을 사용할 수 있습니다.</div>';
+  if (socialRenderCache.my !== myMarkup) {
+    myCard.innerHTML = myMarkup;
+    socialRenderCache.my = myMarkup;
+  }
 
-  const reqItem = (row, actions = '') => `<div class="social-item">
-    <div class="social-item-title">${esc(row.dj_name || 'UNKNOWN')} (${esc(row.infinitas_id || '')})</div>
-    <div class="social-item-sub">${esc(row.relation_type)} / ${esc(row.status || '-')}</div>
-    ${actions}
-  </div>`;
-  requests.innerHTML = `
-    <div class="social-item">팔로우 최대 ${FOLLOW_LIMIT}명</div>
-    <div class="social-item-title">받은 요청</div>
-    ${incomingPending.length ? incomingPending.map((r) => reqItem(r, `<div class="dialog-actions"><button class="small-btn" data-follow-accept="${esc(r.request_id)}">허가</button><button class="small-btn" data-follow-reject="${esc(r.request_id)}">거부</button></div>`)).join('') : '<div class="history-empty">없음</div>'}
-    <div class="social-item-title">보낸 요청</div>
-    ${outgoingPending.length ? outgoingPending.map((r) => reqItem(r)).join('') : '<div class="history-empty">없음</div>'}
-  `;
-
-  const statusCycle = ['completed', 'current', 'upcoming'];
-  feed.innerHTML = follows.length
-    ? follows.slice(0, 30).map((row, idx) => {
-      const st = statusCycle[idx % statusCycle.length];
-      const statusKo = st === 'completed' ? '완료' : st === 'current' ? '진행중' : '예정';
-      const pct = st === 'completed' ? 100 : st === 'current' ? 65 : 25;
-      const head = `${row.dj_name || 'UNKNOWN'} (${row.infinitas_id || ''})`;
-      const msg = st === 'completed'
-        ? '최근 히스토리/훈장 갱신이 기록되었습니다.'
-        : st === 'current'
-          ? '플레이 갱신 추적 중입니다.'
-          : '새 소식 대기 중입니다.';
+  const feedMarkup = socialFeedItems.length
+    ? socialFeedItems.slice(0, 60).map((item, idx) => {
+      const profile = socialProfileMap.get(String(item.peer_user_id || '')) || {};
+      const hasIcon = !!String(item.icon_data_url || profile.icon || '').trim();
+      const icon = String(item.icon_data_url || profile.icon || '');
       return `
-      <article class="social-feed-post status-${st}">
-        <div class="social-feed-dot status-${st}"></div>
-        <div class="social-feed-head">${esc(head)}</div>
-        <div class="social-feed-meta">${esc(fmt(nowIso()))} · ${statusKo}</div>
-        <div class="social-feed-body">${esc(msg)}</div>
-        <div class="social-feed-progress"><span style="width:${pct}%"></span></div>
+      <article class="social-feed-post ${feedTypeClass(item.type)}" style="--feed-order:${idx}" data-feed-id="${esc(item.id)}">
+        <button type="button" class="social-feed-close" data-feed-dismiss="${esc(item.id)}" title="삭제">×</button>
+        <div class="social-feed-dot"></div>
+        <div class="social-feed-avatar">${hasIcon ? `<img src="${esc(icon)}" alt="${esc(item.title)}" />` : '<span class="social-avatar-person">S</span>'}</div>
+        <div class="social-feed-head">${esc(item.title)}</div>
+        <div class="social-feed-meta">${esc(fmt(item.created_at || nowIso()))}</div>
+        <div class="social-feed-body">${esc(item.body)}</div>
+        ${item.type === 'goal_transfer_received' && item.payload?.transfer_id
+          ? `<div class="social-feed-actions">
+              <button type="button" class="social-feed-action-btn accept" data-feed-action="goal-accept" data-transfer-id="${esc(item.payload.transfer_id)}">승인</button>
+              <button type="button" class="social-feed-action-btn reject" data-feed-action="goal-reject" data-transfer-id="${esc(item.payload.transfer_id)}">거절</button>
+            </div>`
+          : ''}
+        <div class="social-feed-tags"><span>${esc(feedTypeLabel(item.type))}</span></div>
       </article>`;
     }).join('')
-    : '<div class="history-empty">팔로우한 유저의 소식이 여기에 표시됩니다.</div>';
+    : '<div class="history-empty">새 피드가 없습니다.</div>';
+  if (socialRenderCache.feed !== feedMarkup) {
+    feed.innerHTML = feedMarkup;
+    socialRenderCache.feed = feedMarkup;
+  }
+  if (clearAllBtn) clearAllBtn.disabled = !socialFeedItems.length;
 
-  followList.innerHTML = follows.length
-    ? follows.map((row) => {
+  const listMarkup = followingRows.length
+    ? followingRows.map((row) => {
       const pid = String(row.peer_user_id || '');
       const profile = socialProfileMap.get(pid) || {};
       const hasIcon = !!String(profile.icon || '').trim();
@@ -1987,6 +2235,19 @@ function renderSocialPanel() {
     `;
     }).join('')
     : '<div class="history-empty">팔로우 목록이 없습니다.</div>';
+  if (socialRenderCache.list !== listMarkup) {
+    followList.innerHTML = listMarkup;
+    socialRenderCache.list = listMarkup;
+  }
+
+  const followerBtn = myCard.querySelector('[data-open-followers]');
+  if (followerBtn) {
+    followerBtn.onclick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openFollowersPopupAt(ev.clientX, ev.clientY, followerRows);
+    };
+  }
 }
 
 function clearRefluxGoalCards() {
@@ -2481,62 +2742,6 @@ function showGraphSingle(type, key, e){
   showGraphPopup(type === 'clear' ? 'CLEAR' : 'SCORE', `<div>${esc(key)}: ${summary.count[key] ?? 0}</div>`, e);
 }
 
-async function openChallengeDialog(metaText) {
-  const dialog = $('challengeDialog');
-  const form = $('challengeForm');
-  const lamp = $('challengeLamp');
-  const score = $('challengeScore');
-  const meta = $('challengeDialogMeta');
-  const cancelBtn = $('challengeCancelBtn');
-  if (!dialog || !form || !lamp || !score || !meta || !cancelBtn) return null;
-  meta.textContent = metaText;
-  lamp.checked = true;
-  score.checked = true;
-  if (dialog.open) dialog.close('cancel');
-  const onCancel = () => dialog.close('cancel');
-  const onSubmit = (ev) => {
-    ev.preventDefault();
-    if (!lamp.checked && !score.checked) {
-      toast('램프 또는 스코어 중 하나 이상 선택하세요.', 'warning');
-      return;
-    }
-    dialog.close('send');
-  };
-  cancelBtn.addEventListener('click', onCancel);
-  form.addEventListener('submit', onSubmit);
-  dialog.showModal();
-  return new Promise((resolve) => {
-    const onClose = () => {
-      dialog.removeEventListener('close', onClose);
-      cancelBtn.removeEventListener('click', onCancel);
-      form.removeEventListener('submit', onSubmit);
-      if (dialog.returnValue !== 'send') {
-        resolve(null);
-        return;
-      }
-      if (lamp.checked && score.checked) resolve('both');
-      else if (lamp.checked) resolve('lamp');
-      else resolve('score');
-    };
-    dialog.addEventListener('close', onClose);
-  });
-}
-
-async function sendChallengeToUser(receiverUserId, source, songTitle, chartType, challengeType) {
-  const client = getSupabaseClient();
-  if (!client) throw new Error('Supabase client unavailable');
-  const { data, error } = await client.rpc('send_challenge', {
-    p_receiver_user_id: receiverUserId,
-    p_source: source,
-    p_song_title: songTitle,
-    p_chart_type: chartType,
-    p_challenge_type: challengeType,
-    p_parent_challenge_id: null
-  });
-  if (error) throw error;
-  return data;
-}
-
 async function fetchSongSocialContext(chart) {
   const acc = activeAcc();
   if (!acc?.googleAuthUserId) return [];
@@ -2656,11 +2861,17 @@ function setActivePanel(nextPanel) {
   document.querySelectorAll(`.main-tab[data-panel="${panel}"], .dock-tab[data-panel="${panel}"]`).forEach((x) => x.classList.add('active'));
   state.activePanel = panel;
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
-  $(`panel-${panel}`)?.classList.add('active');
+  const panelEl = $(`panel-${panel}`);
+  panelEl?.classList.add('active');
   if (panel === 'social') {
+    panelEl?.classList.remove('social-enter');
+    requestAnimationFrame(() => panelEl?.classList.add('social-enter'));
+    setTimeout(() => panelEl?.classList.remove('social-enter'), 420);
     refreshSocialOverview().catch(() => {
       // ignore
     });
+  } else {
+    closeFollowersPopup();
   }
 }
 
@@ -2729,6 +2940,72 @@ function initEnhancedSelects() {
 
 function readFileAsDataUrl(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result?.toString()||''); r.onerror=rej; r.readAsDataURL(file);}); }
 
+function charLength(v) {
+  return [...String(v || '')].length;
+}
+
+function validateDjName(v) {
+  const text = String(v || '').trim();
+  const len = charLength(text);
+  if (!text) return 'DJ NAME은 필수입니다.';
+  if (len < DJ_NAME_MIN_LEN || len > DJ_NAME_MAX_LEN) return `DJ NAME은 ${DJ_NAME_MIN_LEN}~${DJ_NAME_MAX_LEN}자로 입력하세요.`;
+  return '';
+}
+
+function loadImageSize(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const out = { width: img.naturalWidth || 0, height: img.naturalHeight || 0 };
+      URL.revokeObjectURL(url);
+      resolve(out);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('이미지 크기를 읽지 못했습니다.'));
+    };
+    img.src = url;
+  });
+}
+
+async function validateImageFile(file, mode = 'icon') {
+  if (!file) return '';
+  if (!IMAGE_ALLOWED_MIME.includes(String(file.type || '').toLowerCase())) {
+    return 'JPG/PNG/WEBP 파일만 사용할 수 있습니다.';
+  }
+  const isIcon = mode === 'icon';
+  const maxBytes = isIcon ? ICON_MAX_BYTES : BANNER_MAX_BYTES;
+  const maxW = isIcon ? ICON_MAX_WIDTH : BANNER_MAX_WIDTH;
+  const maxH = isIcon ? ICON_MAX_HEIGHT : BANNER_MAX_HEIGHT;
+  if ((file.size || 0) > maxBytes) {
+    return `${isIcon ? '아이콘' : '배경'} 파일은 최대 ${Math.round(maxBytes / 1024 / 1024)}MB까지 가능합니다.`;
+  }
+  try {
+    const size = await loadImageSize(file);
+    if (size.width > maxW || size.height > maxH) {
+      return `${isIcon ? '아이콘' : '배경'} 이미지는 최대 ${maxW}x${maxH}px까지 가능합니다.`;
+    }
+  } catch (e) {
+    return e.message || '이미지 검증에 실패했습니다.';
+  }
+  return '';
+}
+
+async function openBannerPickerWithGuide() {
+  const ok = await uiConfirm(
+    [
+      '배경 이미지 파일 조건',
+      `- 형식: JPG / PNG / WEBP`,
+      `- 용량: 최대 ${Math.round(BANNER_MAX_BYTES / 1024 / 1024)}MB`,
+      `- 크기: 최대 ${BANNER_MAX_WIDTH}x${BANNER_MAX_HEIGHT}px`
+    ].join('\n'),
+    { title: '배경 이미지 변경', okText: '파일 선택', cancelText: '취소', showCancel: true }
+  );
+  if (!ok) return;
+  $('socialBannerInput')?.click();
+}
+
 async function openAccountDialog({title,allowCancel,initial}){
   const dialog=$('accountDialog'); const form=$('accountForm'); const nameInput=$('accountNameInput'); const idInput=$('accountIdInput'); const idPreview=$('accountIdPreview'); const iconInput=$('accountIconInput'); const cancelBtn=$('accountCancelBtn');
   const importBlock = $('accountImportBlock');
@@ -2740,7 +3017,22 @@ async function openAccountDialog({title,allowCancel,initial}){
   let iconDataUrl=initial?.iconDataUrl || '';
   let importedAccount = null;
   const onId=()=>{ idInput.value=fmtInf(idInput.value); idPreview.textContent=fmtInfFixed(idInput.value); };
-  const onIcon=async()=>{ const f=iconInput.files?.[0]; if(!f){iconDataUrl=''; return;} try{iconDataUrl=await readFileAsDataUrl(f);}catch{iconDataUrl=''; toast('아이콘 파일을 읽지 못했습니다.');} };
+  const onIcon=async()=>{
+    const f=iconInput.files?.[0];
+    if(!f){iconDataUrl=''; return;}
+    const msg = await validateImageFile(f, 'icon');
+    if (msg) {
+      iconInput.value = '';
+      iconDataUrl = initial?.iconDataUrl || '';
+      toast(msg, 'warning');
+      return;
+    }
+    try{
+      iconDataUrl=await readFileAsDataUrl(f);
+    }catch{
+      iconDataUrl=''; toast('아이콘 파일을 읽지 못했습니다.');
+    }
+  };
   const onCancel=()=>dialog.close('cancel');
   const onSubmit=(e)=>{ e.preventDefault(); dialog.close('save'); };
   const onImportGoogle = async () => {
@@ -2770,7 +3062,9 @@ async function openAccountDialog({title,allowCancel,initial}){
       dialog.removeEventListener('cancel', onDialogCancel);
       if(dialog.returnValue==='cancel'){resolve(null); return;}
       if(dialog.returnValue==='import-google'){ resolve({ importedAccount }); return; }
-      const dj=nameInput.value.trim(); if(!dj){ toast('DJ NAME은 필수입니다.'); resolve('retry'); return; }
+      const dj=nameInput.value.trim();
+      const djErr = validateDjName(dj);
+      if (djErr) { toast(djErr, 'warning'); resolve('retry'); return; }
       resolve({djName:dj, infinitasId:fmtInfFixed(idInput.value), iconDataUrl});
     }; dialog.addEventListener('close',onClose);
   });
@@ -3294,6 +3588,7 @@ function setupEvents(){
   window.addEventListener('scroll', () => {
     hideSongPopup();
     hideGraphPopup();
+    closeFollowersPopup();
   }, true);
 
   $('accountSelect').addEventListener('change', async (e) => {
@@ -3313,6 +3608,7 @@ function setupEvents(){
       state.settings.discoverByDjName = s.discoverByDjName !== false;
       state.settings.followPolicy = s.followPolicy;
       state.settings.shareDataScope = [...s.shareDataScope];
+      state.settings.goalTransferEnabled = s.goalTransferEnabled !== false;
       state.settings.rivalPolicy = s.rivalPolicy;
     }
     authContext.set({ accountId: v || null });
@@ -3346,6 +3642,12 @@ function setupEvents(){
     }
     if (!popup.classList.contains('hidden') && !popup.contains(e.target)) hideSongPopup();
     if (!graphPopup.classList.contains('hidden') && !graphPopup.contains(e.target) && !e.target.closest('.stack-track') && !e.target.closest('.legend-chip')) hideGraphPopup();
+    const followersPopup = $('socialFollowersPopup');
+    if (followersPopup && !followersPopup.classList.contains('hidden')) {
+      const inPopup = followersPopup.contains(e.target);
+      const opener = !!e.target.closest('[data-open-followers]');
+      if (!inPopup && !opener) closeFollowersPopup();
+    }
     if (!$('accountIconMenu').contains(e.target)) { $('accountIconMenu').classList.add('hidden'); }
     if (!e.target.closest('.it-select') && !e.target.closest('.it-search')) closeAllEnhancedSelect();
   });
@@ -3481,13 +3783,15 @@ function setupEvents(){
         ? 'disabled'
         : 'manual';
     state.settings.shareDataScope = selectedShareScopeFromUi();
+    state.settings.goalTransferEnabled = $('settingGoalTransferEnabled')?.checked !== false;
     const acc = activeAcc();
     if (acc) {
       acc.socialSettings = {
         discoverability: state.settings.discoverability,
         discoverByDjName: state.settings.discoverByDjName,
         followPolicy: state.settings.followPolicy,
-        shareDataScope: [...state.settings.shareDataScope]
+        shareDataScope: [...state.settings.shareDataScope],
+        goalTransferEnabled: state.settings.goalTransferEnabled !== false
       };
     }
     await saveState();
@@ -3506,6 +3810,7 @@ function setupEvents(){
     'settingShareGraphs',
     'settingShareGoals',
     'settingShareNone',
+    'settingGoalTransferEnabled',
   ].forEach((id) => {
     $(id)?.addEventListener('change', () => {
       normalizeSocialCheckboxState(id);
@@ -3588,8 +3893,44 @@ function setupEvents(){
       $('socialFollowAddDialog')?.showModal();
     }
     if (e.target.closest('#btnSocialBannerSetting')) {
-      $('socialBannerInput')?.click();
+      openBannerPickerWithGuide();
     }
+  });
+  $('btnSocialFeedClearAll')?.addEventListener('click', () => {
+    dismissAllFeedItems();
+  });
+  $('socialFeed')?.addEventListener('click', (e) => {
+    const actionBtn = e.target.closest('[data-feed-action]');
+    if (actionBtn) {
+      const transferId = actionBtn.getAttribute('data-transfer-id') || '';
+      const action = actionBtn.getAttribute('data-feed-action') || '';
+      const client = getSupabaseClient();
+      if (!client || !transferId) return;
+      const accept = action === 'goal-accept';
+      client.rpc('respond_goal_transfer', { p_transfer_id: transferId, p_accept: accept })
+        .then(async ({ error }) => {
+          if (error) {
+            toast(`목표 전송 응답 실패: ${error.message || error}`, 'error');
+            return;
+          }
+          toast(accept ? '목표 전송을 승인했습니다.' : '목표 전송을 거절했습니다.', 'success');
+          await refreshSocialOverview();
+        })
+        .catch((err) => {
+          toast(`목표 전송 응답 실패: ${err.message || err}`, 'error');
+        });
+      return;
+    }
+    const closeBtn = e.target.closest('[data-feed-dismiss]');
+    if (!closeBtn) return;
+    const feedId = closeBtn.getAttribute('data-feed-dismiss') || '';
+    const card = closeBtn.closest('.social-feed-post');
+    if (card) {
+      card.classList.add('is-dismissing');
+      setTimeout(() => dismissFeedItem(feedId), 180);
+      return;
+    }
+    dismissFeedItem(feedId);
   });
   $('socialBannerInput')?.addEventListener('change', async (e) => {
     const acc = activeAcc();
@@ -3597,6 +3938,11 @@ function setupEvents(){
     const file = e.target?.files?.[0];
     if (!file) return;
     try {
+      const msg = await validateImageFile(file, 'banner');
+      if (msg) {
+        toast(msg, 'warning');
+        return;
+      }
       acc.socialBannerDataUrl = await readFileAsDataUrl(file);
       await saveState();
       renderSocialPanel();
@@ -3632,24 +3978,23 @@ function setupEvents(){
       toast(`목표 전송 실패: ${e.message || e}`, 'error');
     }
   });
-  $('socialFollowRequests')?.addEventListener('click', async (e) => {
-    const accept = e.target.closest('[data-follow-accept]');
-    const reject = e.target.closest('[data-follow-reject]');
-    if (!accept && !reject) return;
-    const requestId = accept?.getAttribute('data-follow-accept') || reject?.getAttribute('data-follow-reject') || '';
-    if (!requestId) return;
+  $('socialFollowersPopup')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-follow-back]');
+    if (!btn) return;
+    const target = btn.getAttribute('data-follow-back') || '';
+    if (!target) return;
     const client = getSupabaseClient();
     if (!client) return;
     try {
-      const { error } = await client.rpc('respond_follow_request', {
-        p_request_id: requestId,
-        p_accept: !!accept
-      });
+      const { data, error } = await client.rpc('send_follow_request', { p_target_user_id: target });
       if (error) throw error;
-      toast(accept ? '팔로우 요청을 허가했습니다.' : '팔로우 요청을 거부했습니다.', 'success');
+      const result = String(data || '');
+      if (result === 'auto_accepted') toast('팔로우가 자동 허가되었습니다.', 'success');
+      else toast('팔로우 요청을 전송했습니다.', 'success');
+      closeFollowersPopup();
       await refreshSocialOverview();
     } catch (err) {
-      toast(`요청 처리 실패: ${err.message || err}`, 'error');
+      toast(`팔로우 요청 실패: ${err.message || err}`, 'error');
     }
   });
 
@@ -3689,6 +4034,7 @@ async function init(){
     state.settings.discoverByDjName = s.discoverByDjName !== false;
     state.settings.followPolicy = s.followPolicy;
     state.settings.shareDataScope = [...s.shareDataScope];
+    state.settings.goalTransferEnabled = s.goalTransferEnabled !== false;
     state.settings.rivalPolicy = s.rivalPolicy;
   }
   authContext.set({ accountId: state.activeAccountId || null });

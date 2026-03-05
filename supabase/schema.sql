@@ -42,15 +42,6 @@ create table if not exists public.goal_shares (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.rivals (
-  id uuid primary key default gen_random_uuid(),
-  owner_user_id uuid not null references auth.users(id) on delete cascade,
-  rival_user_id uuid not null references auth.users(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  unique (owner_user_id, rival_user_id),
-  constraint rivals_not_self_chk check (owner_user_id <> rival_user_id)
-);
-
 create table if not exists public.follow_requests (
   id uuid primary key default gen_random_uuid(),
   requester_user_id uuid not null references auth.users(id) on delete cascade,
@@ -92,7 +83,6 @@ create table if not exists public.challenges (
 alter table public.users enable row level security;
 alter table public.account_states enable row level security;
 alter table public.goal_shares enable row level security;
-alter table public.rivals enable row level security;
 alter table public.follow_requests enable row level security;
 alter table public.follows enable row level security;
 alter table public.challenges enable row level security;
@@ -120,14 +110,6 @@ create policy states_update_own on public.account_states
 drop policy if exists goal_shares_owner_all on public.goal_shares;
 create policy goal_shares_owner_all on public.goal_shares
   for all using (auth.uid() = owner_user_id) with check (auth.uid() = owner_user_id);
-
-drop policy if exists rivals_owner_all on public.rivals;
-create policy rivals_owner_all on public.rivals
-  for all using (auth.uid() = owner_user_id) with check (auth.uid() = owner_user_id);
-
-drop policy if exists rivals_read_reverse on public.rivals;
-create policy rivals_read_reverse on public.rivals
-  for select using (auth.uid() = rival_user_id);
 
 drop policy if exists follow_requests_select_participants on public.follow_requests;
 create policy follow_requests_select_participants on public.follow_requests
@@ -268,11 +250,6 @@ as $$
            case when f.follower_user_id = auth.uid() then f.following_user_id else f.follower_user_id end as peer_id
     from public.follows f
     where auth.uid() in (f.follower_user_id, f.following_user_id)
-    union all
-    select 'rival'::text as kind,
-           case when r.owner_user_id = auth.uid() then r.rival_user_id else r.owner_user_id end as peer_id
-    from public.rivals r
-    where auth.uid() in (r.owner_user_id, r.rival_user_id)
   ),
   peer_rows as (
     select
@@ -307,55 +284,13 @@ as $$
       when p_chart_type = 'L' then coalesce((pr.row->>'SPL EX Score')::int, 0)
       else coalesce((pr.row->>'SPA EX Score')::int, 0)
     end as ex_score,
-    (
-      pr.kind = 'rival'
-      and (
-        (case (select lamp from my_stats)
-          when 'NP' then 0 when 'F' then 1 when 'EASY' then 2 when 'NORMAL' then 3 when 'HC' then 4 when 'EX' then 5 when 'FC' then 6 else 0 end)
-        >
-        (case
-          when p_chart_type = 'H' then case coalesce(pr.row->>'SPH Lamp', 'NP') when 'NP' then 0 when 'F' then 1 when 'EASY' then 2 when 'NORMAL' then 3 when 'HC' then 4 when 'EX' then 5 when 'FC' then 6 else 0 end
-          when p_chart_type = 'L' then case coalesce(pr.row->>'SPL Lamp', 'NP') when 'NP' then 0 when 'F' then 1 when 'EASY' then 2 when 'NORMAL' then 3 when 'HC' then 4 when 'EX' then 5 when 'FC' then 6 else 0 end
-          else case coalesce(pr.row->>'SPA Lamp', 'NP') when 'NP' then 0 when 'F' then 1 when 'EASY' then 2 when 'NORMAL' then 3 when 'HC' then 4 when 'EX' then 5 when 'FC' then 6 else 0 end
-        end)
-        or
-        ((select ex_score from my_stats) >
-          case
-            when p_chart_type = 'H' then coalesce((pr.row->>'SPH EX Score')::int, 0)
-            when p_chart_type = 'L' then coalesce((pr.row->>'SPL EX Score')::int, 0)
-            else coalesce((pr.row->>'SPA EX Score')::int, 0)
-          end
-        )
-      )
-    ) as can_challenge
+    false as can_challenge
   from peer_rows pr
-  where pr.kind in ('follow', 'rival');
+  where pr.kind = 'follow';
 $$;
 
 revoke all on function public.get_song_social_context(text, text) from public;
 grant execute on function public.get_song_social_context(text, text) to authenticated;
-
-create or replace function public.get_rival_overview_context()
-returns table (
-  peer_user_id uuid,
-  dj_name text,
-  infinitas_id text
-)
-language sql
-security definer
-set search_path = public
-as $$
-  select
-    case when r.owner_user_id = auth.uid() then r.rival_user_id else r.owner_user_id end as peer_user_id,
-    u.dj_name,
-    u.infinitas_id
-  from public.rivals r
-  join public.users u on u.auth_user_id = case when r.owner_user_id = auth.uid() then r.rival_user_id else r.owner_user_id end
-  where auth.uid() in (r.owner_user_id, r.rival_user_id);
-$$;
-
-revoke all on function public.get_rival_overview_context() from public;
-grant execute on function public.get_rival_overview_context() to authenticated;
 
 create or replace function public.send_follow_request(p_target_user_id uuid)
 returns text
@@ -457,53 +392,6 @@ $$;
 revoke all on function public.respond_follow_request(uuid, boolean) from public;
 grant execute on function public.respond_follow_request(uuid, boolean) to authenticated;
 
-create or replace function public.add_rival_user(p_target_user_id uuid)
-returns text
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_rival_policy text;
-begin
-  if auth.uid() is null then
-    raise exception 'not_authenticated';
-  end if;
-  if p_target_user_id = auth.uid() then
-    raise exception 'cannot_rival_self';
-  end if;
-  if (select count(*) from public.rivals r where r.owner_user_id = auth.uid()) >= 4 then
-    raise exception 'rival_limit_exceeded';
-  end if;
-
-  select coalesce(a.social_settings->>'rivalPolicy', 'followers')
-  into v_rival_policy
-  from public.account_states a
-  where a.auth_user_id = p_target_user_id;
-
-  if coalesce(v_rival_policy, 'followers') = 'disabled' then
-    raise exception 'target_rival_disabled';
-  end if;
-  if coalesce(v_rival_policy, 'followers') = 'followers'
-     and not exists (
-       select 1 from public.follows f
-       where (f.follower_user_id = auth.uid() and f.following_user_id = p_target_user_id)
-          or (f.follower_user_id = p_target_user_id and f.following_user_id = auth.uid())
-     )
-  then
-    raise exception 'target_rival_followers_only';
-  end if;
-
-  insert into public.rivals (owner_user_id, rival_user_id)
-  values (auth.uid(), p_target_user_id)
-  on conflict do nothing;
-  return 'added';
-end;
-$$;
-
-revoke all on function public.add_rival_user(uuid) from public;
-grant execute on function public.add_rival_user(uuid) to authenticated;
-
 create or replace function public.get_social_overview()
 returns table (
   relation_type text,
@@ -511,6 +399,8 @@ returns table (
   peer_user_id uuid,
   dj_name text,
   infinitas_id text,
+  direction text,
+  icon_data_url text,
   status text,
   created_at timestamptz
 )
@@ -524,6 +414,8 @@ as $$
     case when fr.target_user_id = auth.uid() then fr.requester_user_id else fr.target_user_id end as peer_user_id,
     u.dj_name,
     u.infinitas_id,
+    case when fr.target_user_id = auth.uid() then 'incoming' else 'outgoing' end as direction,
+    coalesce(u.icon_data_url, '') as icon_data_url,
     fr.status,
     fr.created_at
   from public.follow_requests fr
@@ -536,27 +428,46 @@ as $$
     case when f.follower_user_id = auth.uid() then f.following_user_id else f.follower_user_id end as peer_user_id,
     u.dj_name,
     u.infinitas_id,
+    case when f.follower_user_id = auth.uid() then 'following' else 'follower' end as direction,
+    coalesce(u.icon_data_url, '') as icon_data_url,
     'accepted'::text,
     f.created_at
   from public.follows f
   join public.users u on u.auth_user_id = case when f.follower_user_id = auth.uid() then f.following_user_id else f.follower_user_id end
-  where auth.uid() in (f.follower_user_id, f.following_user_id)
-  union all
-  select
-    'rival'::text,
-    null::uuid,
-    case when r.owner_user_id = auth.uid() then r.rival_user_id else r.owner_user_id end as peer_user_id,
-    u.dj_name,
-    u.infinitas_id,
-    'added'::text,
-    r.created_at
-  from public.rivals r
-  join public.users u on u.auth_user_id = case when r.owner_user_id = auth.uid() then r.rival_user_id else r.owner_user_id end
-  where auth.uid() in (r.owner_user_id, r.rival_user_id);
+  where auth.uid() in (f.follower_user_id, f.following_user_id);
 $$;
 
 revoke all on function public.get_social_overview() from public;
 grant execute on function public.get_social_overview() to authenticated;
+
+create or replace function public.get_follow_lists()
+returns table (
+  direction text,
+  peer_user_id uuid,
+  dj_name text,
+  infinitas_id text,
+  icon_data_url text,
+  created_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    case when f.follower_user_id = auth.uid() then 'following' else 'follower' end as direction,
+    case when f.follower_user_id = auth.uid() then f.following_user_id else f.follower_user_id end as peer_user_id,
+    u.dj_name,
+    u.infinitas_id,
+    coalesce(u.icon_data_url, '') as icon_data_url,
+    f.created_at
+  from public.follows f
+  join public.users u on u.auth_user_id = case when f.follower_user_id = auth.uid() then f.following_user_id else f.follower_user_id end
+  where auth.uid() in (f.follower_user_id, f.following_user_id)
+  order by f.created_at desc;
+$$;
+
+revoke all on function public.get_follow_lists() from public;
+grant execute on function public.get_follow_lists() to authenticated;
 
 create or replace function public.send_goal_bundle_to_user(
   p_target_user_id uuid,
@@ -571,9 +482,11 @@ set search_path = public
 as $$
 declare
   v_share_scope jsonb;
+  v_sender_goal_transfer_enabled boolean := true;
+  v_target_goal_transfer_enabled boolean := true;
   v_count int := 0;
   v_norm_goals jsonb := '[]'::jsonb;
-  v_source text := coalesce(nullif(trim(p_sender_dj_name), ''), '팔로우 목표 전송');
+  v_transfer_id uuid;
 begin
   if auth.uid() is null then
     raise exception 'not_authenticated';
@@ -585,12 +498,24 @@ begin
     raise exception 'cannot_send_to_self';
   end if;
   if not exists (
-    select 1
-    from public.follows f
+    select 1 from public.follows f
     where f.follower_user_id = auth.uid()
       and f.following_user_id = p_target_user_id
+  ) or not exists (
+    select 1 from public.follows f
+    where f.follower_user_id = p_target_user_id
+      and f.following_user_id = auth.uid()
   ) then
-    raise exception 'target_not_following';
+    raise exception 'mutual_follow_required';
+  end if;
+
+  select coalesce((a.social_settings->>'goalTransferEnabled')::boolean, true)
+  into v_sender_goal_transfer_enabled
+  from public.account_states a
+  where a.auth_user_id = auth.uid();
+
+  if coalesce(v_sender_goal_transfer_enabled, true) is not true then
+    raise exception 'sender_goal_transfer_disabled';
   end if;
 
   select coalesce(a.social_settings->'shareDataScope', '[]'::jsonb)
@@ -605,14 +530,16 @@ begin
     raise exception 'target_goal_share_disabled';
   end if;
 
-  select coalesce(jsonb_agg(
-    jsonb_set(
-      jsonb_set(g, '{id}', to_jsonb(gen_random_uuid()::text), true),
-      '{source}',
-      to_jsonb(v_source || case when nullif(trim(p_sender_infinitas_id), '') is null then '' else ' (' || trim(p_sender_infinitas_id) || ')' end),
-      true
-    )
-  ), '[]'::jsonb)
+  select coalesce((a.social_settings->>'goalTransferEnabled')::boolean, true)
+  into v_target_goal_transfer_enabled
+  from public.account_states a
+  where a.auth_user_id = p_target_user_id;
+
+  if coalesce(v_target_goal_transfer_enabled, true) is not true then
+    raise exception 'target_goal_transfer_disabled';
+  end if;
+
+  select coalesce(jsonb_agg(g), '[]'::jsonb)
   into v_norm_goals
   from jsonb_array_elements(coalesce(p_goals, '[]'::jsonb)) g
   where coalesce(g->>'title', '') <> '';
@@ -622,13 +549,42 @@ begin
     return 0;
   end if;
 
-  insert into public.account_states (auth_user_id, account_id, goals, social_settings, updated_at, update_reason)
-  values (p_target_user_id, gen_random_uuid()::text, v_norm_goals, '{}'::jsonb, now(), 'goal-transfer')
-  on conflict (auth_user_id)
+  insert into public.goal_transfers (
+    sender_user_id,
+    receiver_user_id,
+    goals,
+    sender_dj_name,
+    sender_infinitas_id,
+    status
+  ) values (
+    auth.uid(),
+    p_target_user_id,
+    v_norm_goals,
+    nullif(trim(p_sender_dj_name), ''),
+    nullif(trim(p_sender_infinitas_id), ''),
+    'pending'
+  )
+  on conflict (sender_user_id, receiver_user_id) where (status = 'pending')
   do update set
-    goals = coalesce(public.account_states.goals, '[]'::jsonb) || v_norm_goals,
-    updated_at = now(),
-    update_reason = 'goal-transfer';
+    goals = excluded.goals,
+    sender_dj_name = excluded.sender_dj_name,
+    sender_infinitas_id = excluded.sender_infinitas_id,
+    created_at = now(),
+    responded_at = null,
+    status = 'pending'
+  returning id into v_transfer_id;
+
+  perform public.create_social_feed_event(
+    p_target_user_id,
+    auth.uid(),
+    'goal_transfer_received',
+    jsonb_build_object(
+      'transfer_id', v_transfer_id::text,
+      'goal_count', v_count
+    ),
+    'goal_transfers',
+    v_transfer_id
+  );
 
   return v_count;
 end;
@@ -637,71 +593,98 @@ $$;
 revoke all on function public.send_goal_bundle_to_user(uuid, jsonb, text, text) from public;
 grant execute on function public.send_goal_bundle_to_user(uuid, jsonb, text, text) to authenticated;
 
-create or replace function public.send_challenge(
-  p_receiver_user_id uuid,
-  p_source text,
-  p_song_title text,
-  p_chart_type text,
-  p_challenge_type text,
-  p_parent_challenge_id uuid default null
+create or replace function public.respond_goal_transfer(
+  p_transfer_id uuid,
+  p_accept boolean
 )
-returns uuid
+returns text
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_id uuid;
+  v_transfer public.goal_transfers;
+  v_tagged_goals jsonb := '[]'::jsonb;
+  v_count int := 0;
+  v_source text;
 begin
   if auth.uid() is null then
     raise exception 'not_authenticated';
   end if;
-  if auth.uid() = p_receiver_user_id then
-    raise exception 'cannot_challenge_self';
-  end if;
-  if p_challenge_type not in ('lamp', 'score', 'both') then
-    raise exception 'invalid_challenge_type';
-  end if;
-  if p_source not in ('song', 'history') then
-    raise exception 'invalid_challenge_source';
-  end if;
-  if not exists (
-    select 1
-    from public.rivals r
-    where (r.owner_user_id = auth.uid() and r.rival_user_id = p_receiver_user_id)
-       or (r.owner_user_id = p_receiver_user_id and r.rival_user_id = auth.uid())
-  ) then
-    raise exception 'receiver_not_rival';
+
+  select * into v_transfer
+  from public.goal_transfers
+  where id = p_transfer_id
+    and receiver_user_id = auth.uid()
+    and status = 'pending';
+
+  if not found then
+    raise exception 'goal_transfer_not_found';
   end if;
 
-  insert into public.challenges (
-    sender_user_id,
-    receiver_user_id,
-    source,
-    song_title,
-    chart_type,
-    challenge_type,
-    status,
-    parent_challenge_id
-  )
-  values (
+  if not p_accept then
+    update public.goal_transfers
+      set status = 'rejected', responded_at = now()
+    where id = p_transfer_id;
+    return 'rejected';
+  end if;
+
+  v_source := coalesce(nullif(trim(v_transfer.sender_dj_name), ''), '팔로우 목표 전송');
+
+  select coalesce(jsonb_agg(
+    jsonb_set(
+      jsonb_set(
+        jsonb_set(
+          jsonb_set(g, '{id}', to_jsonb(gen_random_uuid()::text), true),
+          '{source}',
+          to_jsonb(v_source || case when nullif(trim(v_transfer.sender_infinitas_id), '') is null then '' else ' (' || trim(v_transfer.sender_infinitas_id) || ')' end),
+          true
+        ),
+        '{sender_user_id}',
+        to_jsonb(v_transfer.sender_user_id::text),
+        true
+      ),
+      '{transfer_id}',
+      to_jsonb(v_transfer.id::text),
+      true
+    )
+  ), '[]'::jsonb)
+  into v_tagged_goals
+  from jsonb_array_elements(coalesce(v_transfer.goals, '[]'::jsonb)) g
+  where coalesce(g->>'title', '') <> '';
+
+  v_count := jsonb_array_length(coalesce(v_tagged_goals, '[]'::jsonb));
+
+  insert into public.account_states (auth_user_id, account_id, goals, social_settings, updated_at, update_reason)
+  values (auth.uid(), gen_random_uuid()::text, v_tagged_goals, '{}'::jsonb, now(), 'goal-transfer-accepted')
+  on conflict (auth_user_id)
+  do update set
+    goals = coalesce(public.account_states.goals, '[]'::jsonb) || v_tagged_goals,
+    updated_at = now(),
+    update_reason = 'goal-transfer-accepted';
+
+  update public.goal_transfers
+    set status = 'accepted', responded_at = now()
+  where id = p_transfer_id;
+
+  perform public.create_social_feed_event(
+    v_transfer.sender_user_id,
     auth.uid(),
-    p_receiver_user_id,
-    p_source,
-    p_song_title,
-    p_chart_type,
-    p_challenge_type,
-    'pending',
-    p_parent_challenge_id
-  )
-  returning id into v_id;
+    'goal_transfer_accepted',
+    jsonb_build_object(
+      'transfer_id', v_transfer.id::text,
+      'goal_count', v_count
+    ),
+    'goal_transfers',
+    v_transfer.id
+  );
 
-  return v_id;
+  return 'accepted';
 end;
 $$;
 
-revoke all on function public.send_challenge(uuid, text, text, text, text, uuid) from public;
-grant execute on function public.send_challenge(uuid, text, text, text, text, uuid) to authenticated;
+revoke all on function public.respond_goal_transfer(uuid, boolean) from public;
+grant execute on function public.respond_goal_transfer(uuid, boolean) to authenticated;
 
 create or replace function public.limit_follow_insert()
 returns trigger
@@ -724,28 +707,6 @@ drop trigger if exists trg_limit_follow_insert on public.follows;
 create trigger trg_limit_follow_insert
 before insert on public.follows
 for each row execute procedure public.limit_follow_insert();
-
-create or replace function public.limit_rival_insert()
-returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  if (
-    select count(*)
-    from public.rivals r
-    where r.owner_user_id = new.owner_user_id
-  ) >= 4 then
-    raise exception 'rival_limit_exceeded';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists trg_limit_rival_insert on public.rivals;
-create trigger trg_limit_rival_insert
-before insert on public.rivals
-for each row execute procedure public.limit_rival_insert();
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -772,3 +733,345 @@ drop trigger if exists trg_goal_shares_updated_at on public.goal_shares;
 create trigger trg_goal_shares_updated_at
 before update on public.goal_shares
 for each row execute procedure public.set_updated_at();
+
+create table if not exists public.social_feed_events (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  actor_user_id uuid references auth.users(id) on delete set null,
+  event_type text not null,
+  ref_table text,
+  ref_id uuid,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  dismissed_at timestamptz
+);
+
+create index if not exists social_feed_events_owner_created_idx
+  on public.social_feed_events (owner_user_id, created_at desc);
+
+create table if not exists public.goal_transfers (
+  id uuid primary key default gen_random_uuid(),
+  sender_user_id uuid not null references auth.users(id) on delete cascade,
+  receiver_user_id uuid not null references auth.users(id) on delete cascade,
+  goals jsonb not null default '[]'::jsonb,
+  sender_dj_name text,
+  sender_infinitas_id text,
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  responded_at timestamptz,
+  constraint goal_transfers_not_self_chk check (sender_user_id <> receiver_user_id),
+  constraint goal_transfers_status_chk check (status in ('pending', 'accepted', 'rejected', 'canceled'))
+);
+
+create unique index if not exists goal_transfers_pending_unique
+  on public.goal_transfers (sender_user_id, receiver_user_id)
+  where status = 'pending';
+
+alter table public.social_feed_events enable row level security;
+alter table public.goal_transfers enable row level security;
+
+drop policy if exists social_feed_events_select_owner on public.social_feed_events;
+create policy social_feed_events_select_owner on public.social_feed_events
+  for select using (auth.uid() = owner_user_id);
+
+drop policy if exists social_feed_events_update_owner on public.social_feed_events;
+create policy social_feed_events_update_owner on public.social_feed_events
+  for update using (auth.uid() = owner_user_id) with check (auth.uid() = owner_user_id);
+
+drop policy if exists goal_transfers_select_participants on public.goal_transfers;
+create policy goal_transfers_select_participants on public.goal_transfers
+  for select using (auth.uid() in (sender_user_id, receiver_user_id));
+
+drop policy if exists goal_transfers_insert_sender on public.goal_transfers;
+create policy goal_transfers_insert_sender on public.goal_transfers
+  for insert with check (auth.uid() = sender_user_id);
+
+drop policy if exists goal_transfers_update_receiver_sender on public.goal_transfers;
+create policy goal_transfers_update_receiver_sender on public.goal_transfers
+  for update using (auth.uid() in (sender_user_id, receiver_user_id))
+  with check (auth.uid() in (sender_user_id, receiver_user_id));
+
+create or replace function public.create_social_feed_event(
+  p_owner_user_id uuid,
+  p_actor_user_id uuid,
+  p_event_type text,
+  p_payload jsonb default '{}'::jsonb,
+  p_ref_table text default null,
+  p_ref_id uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  insert into public.social_feed_events (
+    owner_user_id,
+    actor_user_id,
+    event_type,
+    payload,
+    ref_table,
+    ref_id
+  )
+  values (
+    p_owner_user_id,
+    p_actor_user_id,
+    p_event_type,
+    coalesce(p_payload, '{}'::jsonb),
+    p_ref_table,
+    p_ref_id
+  )
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke all on function public.create_social_feed_event(uuid, uuid, text, jsonb, text, uuid) from public;
+grant execute on function public.create_social_feed_event(uuid, uuid, text, jsonb, text, uuid) to authenticated;
+
+create or replace function public.feed_follow_request_insert_trigger()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.status = 'pending' then
+    perform public.create_social_feed_event(
+      new.target_user_id,
+      new.requester_user_id,
+      'follow_request_received',
+      jsonb_build_object('request_id', new.id::text),
+      'follow_requests',
+      new.id
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_feed_follow_request_insert on public.follow_requests;
+create trigger trg_feed_follow_request_insert
+after insert on public.follow_requests
+for each row execute procedure public.feed_follow_request_insert_trigger();
+
+create or replace function public.feed_follow_request_update_trigger()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if old.status <> 'accepted' and new.status = 'accepted' then
+    perform public.create_social_feed_event(
+      new.requester_user_id,
+      new.target_user_id,
+      'follow_request_accepted',
+      jsonb_build_object('request_id', new.id::text),
+      'follow_requests',
+      new.id
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_feed_follow_request_update on public.follow_requests;
+create trigger trg_feed_follow_request_update
+after update on public.follow_requests
+for each row execute procedure public.feed_follow_request_update_trigger();
+
+create or replace function public.feed_follows_delete_trigger()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  perform public.create_social_feed_event(
+    old.following_user_id,
+    old.follower_user_id,
+    'follower_unfollowed',
+    '{}'::jsonb,
+    'follows',
+    null
+  );
+  return old;
+end;
+$$;
+
+drop trigger if exists trg_feed_follows_delete on public.follows;
+create trigger trg_feed_follows_delete
+after delete on public.follows
+for each row execute procedure public.feed_follows_delete_trigger();
+
+create or replace function public.feed_history_update_trigger()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_old_count int;
+  v_new_count int;
+  v_last jsonb;
+  v_follower uuid;
+begin
+  v_old_count := coalesce(jsonb_array_length(coalesce(old.history, '[]'::jsonb)), 0);
+  v_new_count := coalesce(jsonb_array_length(coalesce(new.history, '[]'::jsonb)), 0);
+  if v_new_count <= v_old_count then
+    return new;
+  end if;
+  v_last := coalesce(new.history -> (v_new_count - 1), '{}'::jsonb);
+  for v_follower in
+    select f.follower_user_id
+    from public.follows f
+    where f.following_user_id = new.auth_user_id
+  loop
+    perform public.create_social_feed_event(
+      v_follower,
+      new.auth_user_id,
+      'follow_history_updated',
+      jsonb_build_object(
+        'history_id', coalesce(v_last->>'id', ''),
+        'summary', coalesce(v_last->>'summary', '')
+      ),
+      'account_states',
+      null
+    );
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_feed_history_update on public.account_states;
+create trigger trg_feed_history_update
+after update on public.account_states
+for each row execute procedure public.feed_history_update_trigger();
+
+create or replace function public.feed_goal_update_trigger()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_rec record;
+begin
+  if coalesce(new.update_reason, '') like 'goal-transfer%' then
+    return new;
+  end if;
+  if coalesce(new.goals, '[]'::jsonb) = coalesce(old.goals, '[]'::jsonb) then
+    return new;
+  end if;
+  for v_rec in
+    with old_goals as (
+      select g->>'id' as goal_id, g as goal
+      from jsonb_array_elements(coalesce(old.goals, '[]'::jsonb)) g
+    ),
+    new_goals as (
+      select
+        g->>'id' as goal_id,
+        g as goal,
+        nullif(g->>'sender_user_id', '')::uuid as sender_user_id
+      from jsonb_array_elements(coalesce(new.goals, '[]'::jsonb)) g
+    ),
+    changed as (
+      select
+        ng.sender_user_id,
+        count(*)::int as changed_count
+      from new_goals ng
+      left join old_goals og on og.goal_id = ng.goal_id
+      where ng.sender_user_id is not null
+        and (og.goal is null or og.goal is distinct from ng.goal)
+      group by ng.sender_user_id
+    )
+    select * from changed
+  loop
+    perform public.create_social_feed_event(
+      v_rec.sender_user_id,
+      new.auth_user_id,
+      'goal_transfer_updated',
+      jsonb_build_object('changed_count', v_rec.changed_count),
+      'account_states',
+      null
+    );
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_feed_goal_update on public.account_states;
+create trigger trg_feed_goal_update
+after update on public.account_states
+for each row execute procedure public.feed_goal_update_trigger();
+
+create or replace function public.get_feed_events(p_limit int default 100)
+returns table (
+  id uuid,
+  event_type text,
+  actor_user_id uuid,
+  actor_dj_name text,
+  actor_infinitas_id text,
+  actor_icon_data_url text,
+  payload jsonb,
+  created_at timestamptz
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    e.id,
+    e.event_type,
+    e.actor_user_id,
+    coalesce(u.dj_name, '') as actor_dj_name,
+    coalesce(u.infinitas_id, '') as actor_infinitas_id,
+    coalesce(u.icon_data_url, '') as actor_icon_data_url,
+    e.payload,
+    e.created_at
+  from public.social_feed_events e
+  left join public.users u on u.auth_user_id = e.actor_user_id
+  where e.owner_user_id = auth.uid()
+    and e.dismissed_at is null
+  order by e.created_at desc
+  limit greatest(1, least(coalesce(p_limit, 100), 300));
+$$;
+
+revoke all on function public.get_feed_events(int) from public;
+grant execute on function public.get_feed_events(int) to authenticated;
+
+create or replace function public.dismiss_feed_event(p_event_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  update public.social_feed_events
+  set dismissed_at = now()
+  where id = p_event_id
+    and owner_user_id = auth.uid()
+    and dismissed_at is null
+  returning true;
+$$;
+
+revoke all on function public.dismiss_feed_event(uuid) from public;
+grant execute on function public.dismiss_feed_event(uuid) to authenticated;
+
+create or replace function public.dismiss_all_feed_events()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  update public.social_feed_events
+  set dismissed_at = now()
+  where owner_user_id = auth.uid()
+    and dismissed_at is null;
+  get diagnostics v_count = row_count;
+  return coalesce(v_count, 0);
+end;
+$$;
+
+revoke all on function public.dismiss_all_feed_events() from public;
+grant execute on function public.dismiss_all_feed_events() to authenticated;

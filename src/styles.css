@@ -1673,6 +1673,12 @@ button.danger {
   font-weight: 700;
 }
 
+.field-help {
+  margin-top: -4px;
+  font-size: 11px;
+  color: #6f7f96;
+}
+
 #accountForm input,
 #goalExportForm input {
   border: 1px solid #909090;
@@ -1949,8 +1955,14 @@ button.danger {
 .social-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 280px;
-  gap: 12px;
+  gap: 14px;
   min-height: 480px;
+  background:
+    radial-gradient(circle at 12% -20%, rgba(145, 186, 238, 0.35), transparent 42%),
+    radial-gradient(circle at 95% 12%, rgba(178, 214, 255, 0.4), transparent 34%),
+    #f0f2f5;
+  border-radius: 16px;
+  padding: 14px;
 }
 
 .social-col {
@@ -1961,17 +1973,44 @@ button.danger {
 }
 
 .social-card {
-  border: 1px solid #c6d3e4;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f9fbff 0%, #eef4fb 100%);
-  padding: 10px;
+  border: 1px solid #dce3ef;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(21, 38, 63, 0.08);
 }
 
 .social-card-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
-  color: #2d4563;
-  margin-bottom: 8px;
+  color: #3c5c86;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.social-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.social-feed-clear-btn {
+  border: 1px solid #b8c7dd;
+  border-radius: 999px;
+  background: #f7faff;
+  color: #3a5e8d;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  min-height: 0;
+}
+
+.social-feed-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .social-search-row {
@@ -2015,7 +2054,8 @@ button.danger {
 
 .social-feed {
   position: relative;
-  padding-left: 16px;
+  padding-left: 18px;
+  gap: 10px;
 }
 
 .social-feed::before {
@@ -2025,15 +2065,15 @@ button.danger {
   top: 4px;
   bottom: 4px;
   width: 2px;
-  background: linear-gradient(180deg, #9bb8dd 0%, #c5d8f0 100%);
+  background: linear-gradient(180deg, #8cb1de 0%, #bfd2ea 100%);
   border-radius: 2px;
 }
 
 .social-item {
   border: 1px solid #d2dceb;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 8px;
+  padding: 10px;
   font-size: 12px;
   color: #334861;
 }
@@ -2085,11 +2125,18 @@ button.danger {
 }
 
 .social-feed-post {
-  border: 1px solid #cdd9ea;
-  border-radius: 12px;
+  border: 1px solid #d6dfed;
+  border-radius: 14px;
   background: #ffffff;
-  padding: 10px;
+  padding: 10px 12px 10px 52px;
   position: relative;
+  box-shadow: 0 5px 14px rgba(33, 52, 79, 0.08);
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.social-feed-post:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(33, 52, 79, 0.14);
 }
 
 .social-feed-dot {
@@ -2101,25 +2148,35 @@ button.danger {
   border-radius: 999px;
   border: 2px solid #ffffff;
   box-shadow: 0 0 0 1px rgba(89, 121, 161, 0.28);
-}
-
-.social-feed-dot.status-completed {
-  background: #26b36d;
-}
-
-.social-feed-dot.status-current {
-  background: #3b82f6;
-}
-
-.social-feed-dot.status-upcoming {
-  background: #f59e0b;
+  background: #5f89bd;
 }
 
 .social-feed-head {
-  font-size: 12px;
+  font-size: 13px;
   color: #334b69;
-  font-weight: 700;
+  font-weight: 800;
   margin-bottom: 2px;
+}
+
+.social-feed-avatar {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid #c0cde0;
+  background: #edf3fb;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+
+.social-feed-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .social-feed-meta {
@@ -2130,41 +2187,165 @@ button.danger {
 
 .social-feed-body {
   font-size: 12px;
-  color: #5a6f88;
+  color: #536986;
   line-height: 1.45;
 }
 
-.social-feed-progress {
+.social-feed-tags {
   margin-top: 8px;
-  height: 4px;
-  background: #e6edf7;
-  border-radius: 999px;
-  overflow: hidden;
+  display: flex;
+  gap: 6px;
 }
 
-.social-feed-progress > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #4f86d2 0%, #66b4f2 100%);
+.social-feed-tags span {
+  border: 1px solid #d5deeb;
+  background: #f6f9fe;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #4e6a8f;
+}
+
+.social-feed-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.social-feed-action-btn {
+  border: 1px solid #b8cbe6;
+  border-radius: 999px;
+  background: #f6f9ff;
+  color: #3c5f8f;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.social-feed-action-btn.accept {
+  border-color: #85ca9f;
+  background: #effaf2;
+  color: #1d7a43;
+}
+
+.social-feed-action-btn.reject {
+  border-color: #e2b7b7;
+  background: #fff4f4;
+  color: #a94f4f;
+}
+
+.social-feed-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid #c4d1e4;
+  background: rgba(255, 255, 255, 0.94);
+  color: #5d7698;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  padding: 0;
+}
+
+.social-feed-post:hover .social-feed-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.social-feed-post.is-dismissing {
+  animation: feedDismiss 180ms ease forwards;
+}
+
+.social-feed-post.feed-request-in {
+  background: #f4f9ff;
+  border-color: #cfdef2;
+}
+
+.social-feed-post.feed-request-in .social-feed-dot {
+  background: #3f7fd6;
+}
+
+.social-feed-post.feed-request-ok {
+  background: #f3fbf6;
+  border-color: #cae8d3;
+}
+
+.social-feed-post.feed-request-ok .social-feed-dot {
+  background: #28a262;
+}
+
+.social-feed-post.feed-unfollow {
+  background: #fff6f4;
+  border-color: #efd3cc;
+}
+
+.social-feed-post.feed-unfollow .social-feed-dot {
+  background: #cb684e;
+}
+
+.social-feed-post.feed-history {
+  background: #f6f7ff;
+  border-color: #d9def7;
+}
+
+.social-feed-post.feed-history .social-feed-dot {
+  background: #686cd8;
+}
+
+.social-feed-post.feed-goal-updated {
+  background: #f2fcfb;
+  border-color: #cde9e4;
+}
+
+.social-feed-post.feed-goal-updated .social-feed-dot {
+  background: #2f9c93;
+}
+
+.social-feed-post.feed-goal-approved {
+  background: #f5fbf3;
+  border-color: #d5ebcc;
+}
+
+.social-feed-post.feed-goal-approved .social-feed-dot {
+  background: #59a63f;
+}
+
+.social-feed-post.feed-goal-received {
+  background: #fff9f2;
+  border-color: #eedfc8;
+}
+
+.social-feed-post.feed-goal-received .social-feed-dot {
+  background: #d58a34;
 }
 
 .social-follow-list {
-  gap: 2px;
+  gap: 4px;
 }
 
 .social-follow-user {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 6px 2px;
-  border-radius: 8px;
-  border: 0;
-  background: transparent;
+  padding: 8px 6px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(33, 52, 79, 0.05);
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .social-follow-user:hover {
-  background: rgba(255, 255, 255, 0.45);
+  background: #f7faff;
+  border-color: #d8e3f2;
 }
 
 .social-follow-name {
@@ -2173,15 +2354,30 @@ button.danger {
   color: #2a3f59;
 }
 
+.social-follow-back {
+  min-width: 58px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid #8fb0db;
+  background: linear-gradient(180deg, #3e80d7 0%, #2f6fd1 100%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 8px;
+  box-shadow: 0 4px 10px rgba(47, 111, 209, 0.28);
+}
+
 .social-me-card {
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
-  border: 1px solid #c6d3e4;
-  background: linear-gradient(180deg, #f9fbff 0%, #eef4fb 100%);
+  border: 1px solid #d7dfeb;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+  box-shadow: 0 10px 24px rgba(24, 43, 70, 0.1);
 }
 
 .social-me-banner {
-  height: 80px;
+  height: 108px;
   background-size: cover;
   background-position: center;
   position: relative;
@@ -2191,7 +2387,9 @@ button.danger {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(10, 20, 36, 0.05), rgba(10, 20, 36, 0.25));
+  background:
+    linear-gradient(180deg, rgba(14, 23, 40, 0.08), rgba(14, 23, 40, 0.35)),
+    linear-gradient(115deg, rgba(124, 174, 235, 0.35), rgba(124, 174, 235, 0));
 }
 
 .social-me-banner-setting {
@@ -2208,7 +2406,7 @@ button.danger {
 }
 
 .social-me-avatar-wrap {
-  margin-top: -28px;
+  margin-top: -34px;
   display: flex;
   justify-content: center;
   position: relative;
@@ -2216,20 +2414,21 @@ button.danger {
 }
 
 .social-me-avatar {
-  width: 62px;
-  height: 62px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
-  border: 3px solid #eef4fb;
+  border: 4px solid #ffffff;
   object-fit: cover;
   background: #f8fbff;
+  box-shadow: 0 8px 16px rgba(36, 59, 91, 0.22);
 }
 
 .social-me-body {
-  padding: 8px 12px 12px;
+  padding: 10px 14px 14px;
 }
 
 .social-me-name {
-  font-size: 18px;
+  font-size: 22px;
   line-height: 1.1;
   font-weight: 800;
   color: #223650;
@@ -2239,16 +2438,16 @@ button.danger {
 .social-me-id {
   margin-top: 2px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: #4b6788;
 }
 
 .social-me-stats {
-  margin-top: 10px;
-  border: 1px solid #d4deeb;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.66);
+  margin-top: 12px;
+  border: 1px solid #d8e1ee;
+  border-radius: 12px;
+  background: #f8fbff;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2256,6 +2455,18 @@ button.danger {
 .social-me-stat {
   padding: 8px 6px;
   text-align: center;
+}
+
+.social-me-stat-btn {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.social-me-stat-btn.active {
+  background: rgba(74, 120, 185, 0.14);
 }
 
 .social-me-stat + .social-me-stat {
@@ -2277,50 +2488,132 @@ button.danger {
 
 .social-follow-add-btn {
   margin-top: 10px;
-  width: 52px;
-  height: 52px;
-  border: 0;
-  border-radius: 26px;
-  background: #2f6fd1;
+  margin-left: auto;
+  margin-right: auto;
+  position: relative;
+  width: 56px;
+  height: 42px;
+  border: 1px solid #2e6aca;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3f83dd 0%, #2f6fd1 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 14px;
+  padding: 0 16px;
   overflow: hidden;
-  transition: width 220ms ease;
+  transition: width 240ms ease, box-shadow 140ms ease;
+  box-shadow: 0 5px 14px rgba(47, 111, 209, 0.36);
 }
 
 .social-follow-add-btn:hover {
-  width: 170px;
+  width: 176px;
+  box-shadow: 0 10px 22px rgba(47, 111, 209, 0.44);
 }
 
 .social-follow-add-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
   font-size: 24px;
   line-height: 1;
   font-weight: 700;
+  opacity: 1;
+  transition: opacity 120ms ease, transform 160ms ease;
 }
 
 .social-follow-add-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   opacity: 0;
-  transform: translateX(8px);
-  transition: opacity 140ms ease, transform 180ms ease;
+  transition: opacity 140ms ease;
 }
 
 .social-follow-add-btn:hover .social-follow-add-text {
   opacity: 1;
-  transform: translateX(0);
+}
+
+.social-follow-add-btn:hover .social-follow-add-icon {
+  opacity: 0;
+  transform: translate(-50%, -52%) scale(0.9);
 }
 
 .social-me-footnote {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.35;
-  color: #607996;
+  color: #637e9f;
+}
+
+.social-followers-popup {
+  position: fixed;
+  z-index: 1700;
+  min-width: 280px;
+  max-width: 360px;
+  max-height: min(56vh, 420px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #d4ddec;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 18px 40px rgba(26, 44, 69, 0.24);
+  display: grid;
+  gap: 6px;
+}
+
+#panel-social.social-enter .social-layout {
+  animation: socialPanelIn 220ms ease both;
+}
+
+@keyframes socialCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes socialFeedIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes feedDismiss {
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+    max-height: 0;
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
+  }
+}
+
+@keyframes socialPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .song-follow-line {
@@ -3106,8 +3399,10 @@ body.theme-dark .social-feed-dot {
   box-shadow: 0 0 0 1px rgba(120, 150, 189, 0.25);
 }
 
-body.theme-dark .social-feed-progress {
+body.theme-dark .social-feed-clear-btn {
   background: #253448;
+  border-color: #4c6385;
+  color: #cbe0fa;
 }
 
 body.theme-dark .social-follow-user:hover {
@@ -3117,6 +3412,23 @@ body.theme-dark .social-follow-user:hover {
 
 body.theme-dark .social-follow-name {
   color: #dbe8f8;
+}
+
+body.theme-dark .social-feed-close {
+  background: rgba(26, 35, 49, 0.94);
+  border-color: #4a5d79;
+  color: #c7d8ef;
+}
+
+body.theme-dark .social-followers-popup {
+  background: linear-gradient(180deg, #1f2a3a 0%, #1a2331 100%);
+  border-color: #415778;
+}
+
+body.theme-dark .social-feed-action-btn {
+  background: #26354a;
+  border-color: #4f6788;
+  color: #d4e4f8;
 }
 
 body.theme-dark .ui-btn,

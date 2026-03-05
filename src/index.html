@@ -201,24 +201,24 @@
         <div class="social-layout">
           <aside class="social-col social-col-left">
             <div id="socialMyCard" class="social-card"></div>
-            <div class="social-card">
-              <div class="social-card-title">팔로우 요청</div>
-              <div id="socialFollowRequests" class="social-requests"></div>
-            </div>
           </aside>
           <main class="social-col social-col-center">
             <div class="social-card">
-              <div class="social-card-title">피드</div>
+              <div class="social-card-head">
+                <div class="social-card-title">피드</div>
+                <button id="btnSocialFeedClearAll" type="button" class="social-feed-clear-btn" title="모든 피드 삭제">전체 삭제</button>
+              </div>
               <div id="socialFeed" class="social-feed"></div>
             </div>
           </main>
           <aside class="social-col social-col-right">
             <div class="social-card">
-              <div class="social-card-title">팔로우 목록</div>
+              <div id="socialFollowListTitle" class="social-card-title">팔로우 목록</div>
               <div id="socialFollowList" class="social-follow-list"></div>
             </div>
           </aside>
         </div>
+        <div id="socialFollowersPopup" class="social-followers-popup hidden"></div>
         <input id="socialBannerInput" type="file" accept="image/*" class="hidden" />
         <dialog id="socialFollowAddDialog" class="account-dialog">
           <form method="dialog" id="socialFollowAddForm">
@@ -254,12 +254,14 @@
       <form method="dialog" id="accountForm">
         <h3 id="accountDialogTitle">계정 생성</h3>
         <label class="field-label" for="accountNameInput">DJ NAME</label>
-        <input id="accountNameInput" required maxlength="24" />
+        <input id="accountNameInput" required maxlength="16" />
+        <div class="field-help">2~16자 권장</div>
         <label class="field-label" for="accountIdInput">INFINITAS ID (선택)</label>
         <input id="accountIdInput" inputmode="numeric" placeholder="숫자 12자리 입력" />
         <div id="accountIdPreview" class="id-preview">C-0000-0000-0000</div>
         <label class="field-label" for="accountIconInput">아이콘 이미지 (선택)</label>
         <input id="accountIconInput" type="file" accept="image/*" />
+        <div class="field-help">JPG/PNG/WEBP, 최대 2MB, 최대 512x512</div>
         <div id="accountImportBlock" class="auth-link-block account-import-block">
           <button id="accountImportGoogleBtn" type="button" class="google-link-btn" title="Google 계정 불러오기">
             <img src="../assets/icon/google.png" alt="Google" />
@@ -290,30 +292,6 @@
         <div class="dialog-actions">
           <button id="uiConfirmCancelBtn" type="button" value="cancel">취소</button>
           <button id="uiConfirmOkBtn" type="submit" value="ok">확인</button>
-        </div>
-      </form>
-    </dialog>
-    <dialog id="challengeDialog" class="account-dialog">
-      <form method="dialog" id="challengeForm">
-        <h3>도전장 전송</h3>
-        <div id="challengeDialogMeta" class="confirm-message">-</div>
-        <label class="settings-item">
-          <span class="setting-check">
-            <input id="challengeLamp" type="checkbox" checked />
-            <span class="setting-check-ui"></span>
-          </span>
-          <span>램프 도전장</span>
-        </label>
-        <label class="settings-item">
-          <span class="setting-check">
-            <input id="challengeScore" type="checkbox" checked />
-            <span class="setting-check-ui"></span>
-          </span>
-          <span>스코어 도전장</span>
-        </label>
-        <div class="dialog-actions">
-          <button id="challengeCancelBtn" type="button" value="cancel">취소</button>
-          <button id="challengeSendBtn" type="submit" value="send">전송</button>
         </div>
       </form>
     </dialog>
@@ -502,6 +480,13 @@
                   <span class="setting-check-ui"></span>
                 </span>
                 <span>불가</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingGoalTransferEnabled" type="checkbox" checked />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>목표 전송 허용 (서로 팔로우 상태)</span>
               </label>
             </div>
 
