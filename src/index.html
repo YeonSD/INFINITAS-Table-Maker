@@ -252,6 +252,7 @@
       <form method="dialog">
         <button id="socialPeerRadarClose" type="submit" class="dialog-close-fab" aria-label="닫기">×</button>
         <div id="socialPeerRadarBody" class="help-body radar-dialog-body"></div>
+        <div id="socialPeerRadarAxisPopup" class="radar-axis-popup hidden"></div>
       </form>
     </dialog>
 
@@ -609,8 +610,7 @@
         <div class="dock-item">
           <button class="dock-tab" data-panel="settings" aria-label="설정">
             <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true">
-              <path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.11-.2-.36-.28-.57-.2l-2.39.96c-.5-.38-1.05-.69-1.66-.92l-.39-2.89c-.03-.22-.22-.38-.46-.38h-4c-.24 0-.43.17-.46.38l-.39 2.89c-.61.23-1.17.53-1.67.92l-2.39-.96c-.21-.08-.46 0-.57.2L3.1 8.87c-.11.2-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.11.2.36.28.57.2l2.39-.96c.5.38 1.05.69 1.67.92l.39 2.89c.03.22.22.38.46.38h4c.24 0 .43-.17.46-.38l.39-2.89c.61-.23 1.17-.53 1.67-.92l2.39.96c.21.08.46 0 .57-.2l1.92-3.32c.11-.2.06-.47-.12-.61l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="currentColor"/>
             </svg>
           </button>
           <span class="dock-tip">설정</span>

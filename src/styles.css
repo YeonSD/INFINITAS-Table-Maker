@@ -2406,12 +2406,38 @@ button.danger {
   right: 8px;
   top: 8px;
   z-index: 1;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  background: rgba(255, 255, 255, 0.72);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.78);
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #28456b;
+  box-shadow: 0 7px 14px rgba(26, 45, 71, 0.22);
+  opacity: 0;
+  transform: translateY(-3px) scale(0.9);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), background 120ms ease;
+}
+
+.social-me-banner-setting svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.social-me-banner:hover .social-me-banner-setting,
+.social-me-banner:focus-within .social-me-banner-setting {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.social-me-banner-setting:hover {
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .social-me-avatar-wrap {
@@ -2472,6 +2498,23 @@ button.danger {
   border-radius: 0;
   cursor: pointer;
   min-height: 0;
+  appearance: none;
+  outline: none;
+  box-shadow: none;
+  transition: background 140ms ease, box-shadow 160ms ease, transform 140ms ease;
+}
+
+.social-me-stat-btn[data-open-followers] {
+  border-radius: 0 12px 12px 0;
+}
+
+.social-me-stat-btn[data-open-followers]:hover,
+.social-me-stat-btn[data-open-followers]:focus-visible {
+  background: linear-gradient(180deg, #fafdff 0%, #edf5ff 100%);
+  box-shadow:
+    2px 6px 14px rgba(40, 66, 102, 0.22),
+    inset 1px 0 0 rgba(188, 210, 240, 0.7);
+  transform: translateY(-1px);
 }
 
 .social-me-stat-btn.active {
@@ -2594,8 +2637,8 @@ button.danger {
 
 .dialog-close-fab {
   position: absolute;
-  right: -16px;
-  top: -16px;
+  right: -12px;
+  top: -20px;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -2612,20 +2655,84 @@ button.danger {
   z-index: 20;
 }
 
+.radar-dialog form .dialog-close-fab,
+.radar-dialog form .dialog-close-fab {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.radar-dialog form .dialog-close-fab {
+  transform: translateY(4px) scale(0.72);
+}
+
+.radar-dialog form:hover .dialog-close-fab,
+.radar-dialog form:hover .dialog-close-fab {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.radar-dialog form:hover .dialog-close-fab {
+  transform: translateY(0) scale(1);
+}
+
+.radar-dialog form:hover .dialog-close-fab {
+  transition-delay: 0ms;
+}
+
 .radar-dialog-body {
   background: linear-gradient(180deg, #1b2230 0%, #111722 100%);
   border-radius: 10px;
-  border: 1px solid #3a4b67;
+  border: 1px solid #2f4361;
   padding: 10px 8px;
   animation: socialCardIn 220ms ease both;
   max-width: 360px;
   margin: 0 auto;
+  box-shadow:
+    inset 0 1px 0 rgba(187, 214, 247, 0.16),
+    inset 0 -1px 0 rgba(5, 9, 18, 0.48),
+    0 12px 26px rgba(8, 14, 27, 0.36);
+  position: relative;
+  overflow: hidden;
+}
+
+.radar-dialog-body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background-image: radial-gradient(
+    circle at 30% 20%,
+    rgba(96, 200, 255, 0),
+    rgba(96, 200, 255, 0.7),
+    rgba(255, 186, 83, 0.64),
+    rgba(179, 107, 255, 0.66),
+    rgba(96, 200, 255, 0)
+  );
+  background-size: 300% 300%;
+  animation: radarBorderShine 11s linear infinite;
+  pointer-events: none;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@keyframes radarBorderShine {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
 }
 
 .social-radar-head {
   display: grid;
   gap: 2px;
   margin-bottom: 8px;
+  justify-items: center;
+  text-align: center;
 }
 
 .social-radar-title {
@@ -3000,6 +3107,10 @@ button.danger {
   margin: 0 auto;
 }
 
+.radar-dialog .radar-wrap {
+  transform: translateX(4px);
+}
+
 .radar-dialog .account-radar-bars {
   width: 100%;
 }
@@ -3016,6 +3127,10 @@ button.danger {
 .radar-dialog form {
   position: relative;
   padding: 0;
+}
+
+#radarDialog form {
+  padding-bottom: 74px;
 }
 
 .radar-axis-popup {
@@ -3068,6 +3183,38 @@ button.danger {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.radar-axis-popup-row .rank-title.radar-title-type-n {
+  color: #75bbff;
+  background: linear-gradient(180deg, #77c5ff 0%, #dff3ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.radar-axis-popup-row .rank-title.radar-title-type-h {
+  color: #ffc74f;
+  background: linear-gradient(180deg, #ffd35f 0%, #fff2c9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.radar-axis-popup-row .rank-title.radar-title-type-a {
+  color: #ff5a5a;
+  background: linear-gradient(180deg, #ff5656 0%, #ffd5d5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.radar-axis-popup-row .rank-title.radar-title-type-l {
+  color: #b17cff;
+  background: linear-gradient(180deg, #ba7cff 0%, #ede0ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .radar-axis-popup-row .rank-value {
@@ -3444,6 +3591,14 @@ body.theme-dark .social-me-stat-value {
   color: #e9f2ff;
 }
 
+body.theme-dark .social-me-stat-btn[data-open-followers]:hover,
+body.theme-dark .social-me-stat-btn[data-open-followers]:focus-visible {
+  background: linear-gradient(180deg, rgba(55, 79, 112, 0.62) 0%, rgba(36, 56, 83, 0.62) 100%);
+  box-shadow:
+    2px 8px 16px rgba(2, 10, 22, 0.45),
+    inset 1px 0 0 rgba(100, 132, 175, 0.65);
+}
+
 body.theme-dark .social-card-title,
 body.theme-dark .social-search-result,
 body.theme-dark .social-item,
@@ -3500,7 +3655,7 @@ body.theme-dark .social-followers-popup {
 
 body.theme-dark .radar-dialog-body {
   background: linear-gradient(180deg, #1f2a3a 0%, #1a2331 100%);
-  border-color: #415778;
+  border-color: #3a5173;
 }
 
 body.theme-dark .social-radar-title {
@@ -3522,6 +3677,7 @@ body.theme-dark .dialog-close-fab {
   border-color: #d07070;
   color: #ffffff;
 }
+
 
 body.theme-dark .ui-btn,
 body.theme-dark button {

@@ -243,6 +243,17 @@ function truncate2(v) {
   return Math.floor(n * 100) / 100;
 }
 
+function normalizeChartType(typeRaw) {
+  const t = String(typeRaw || '').trim().toUpperCase();
+  if (t === 'N' || t === 'H' || t === 'A' || t === 'L') return t;
+  return 'A';
+}
+
+function radarTitleTypeClass(typeRaw) {
+  const t = normalizeChartType(typeRaw).toLowerCase();
+  return `radar-title-type-${t}`;
+}
+
 function radarSvgHtml(radar, options = {}) {
   const labels = RADAR_ORDER;
   const angles = [-90, -30, 30, 90, 150, 210];
@@ -332,11 +343,14 @@ function computePlayerRadarProfile() {
       const scoreRatePercent = truncate2((ex / full) * 100);
       const rateRatio = scoreRatePercent / 100;
       const songKey = titleKey(chart.title || '');
-      const curr = perSong.get(songKey) || { title: chart.title || '', NOTES: 0, PEAK: 0, SCRATCH: 0, SOFLAN: 0, CHARGE: 0, CHORD: 0 };
+      const curr = perSong.get(songKey) || { title: chart.title || '', axisType: {}, NOTES: 0, PEAK: 0, SCRATCH: 0, SOFLAN: 0, CHARGE: 0, CHORD: 0 };
       if (!curr.title) curr.title = chart.title || '';
       RADAR_ORDER.forEach((axis) => {
         const earned = truncate2(Number(radar[axis] || 0) * rateRatio);
-        if (earned > curr[axis]) curr[axis] = earned;
+        if (earned > curr[axis]) {
+          curr[axis] = earned;
+          curr.axisType[axis] = normalizeChartType(chart.type || 'A');
+        }
       });
       perSong.set(songKey, curr);
     });
@@ -345,7 +359,7 @@ function computePlayerRadarProfile() {
   const rankings = {};
   RADAR_ORDER.forEach((axis) => {
     const topRows = [...perSong.values()]
-      .map((x) => ({ title: String(x.title || '').trim(), value: Number(x[axis] || 0) }))
+      .map((x) => ({ title: String(x.title || '').trim(), type: normalizeChartType(x.axisType?.[axis] || 'A'), value: Number(x[axis] || 0) }))
       .filter((x) => x.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
@@ -387,6 +401,7 @@ function computeRadarProfileFromRows(rows) {
         const songKey = titleKey(data.title || '');
         const curr = perSong.get(songKey) || {
           title: data.title || '',
+          axisType: {},
           NOTES: 0,
           PEAK: 0,
           SCRATCH: 0,
@@ -396,7 +411,10 @@ function computeRadarProfileFromRows(rows) {
         };
         RADAR_ORDER.forEach((axis) => {
           const earned = truncate2(Number(radar[axis] || 0) * rateRatio);
-          if (earned > curr[axis]) curr[axis] = earned;
+          if (earned > curr[axis]) {
+            curr[axis] = earned;
+            curr.axisType[axis] = normalizeChartType(type);
+          }
         });
         perSong.set(songKey, curr);
       });
@@ -407,7 +425,7 @@ function computeRadarProfileFromRows(rows) {
   const rankings = {};
   RADAR_ORDER.forEach((axis) => {
     const topRows = songRows
-      .map((x) => ({ title: String(x.title || '').trim(), value: Number(x[axis] || 0) }))
+      .map((x) => ({ title: String(x.title || '').trim(), type: normalizeChartType(x.axisType?.[axis] || 'A'), value: Number(x[axis] || 0) }))
       .filter((x) => x.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
@@ -431,7 +449,7 @@ function chartMetaByKey(key) {
   if (!chart) return null;
   const radar = normalizeRadarData(chart.radar);
   if (!radar) return null;
-  return { title: chart.title, radar };
+  return { title: chart.title, type: normalizeChartType(type || chart.type || 'A'), radar };
 }
 
 function computeRadarProfileFromProgress(progress) {
@@ -451,6 +469,7 @@ function computeRadarProfileFromProgress(progress) {
     const songKey = titleKey(meta.title || '');
     const curr = perSong.get(songKey) || {
       title: meta.title || '',
+      axisType: {},
       NOTES: 0,
       PEAK: 0,
       SCRATCH: 0,
@@ -460,7 +479,10 @@ function computeRadarProfileFromProgress(progress) {
     };
     RADAR_ORDER.forEach((axis) => {
       const earned = truncate2(Number(meta.radar[axis] || 0) * rateRatio);
-      if (earned > curr[axis]) curr[axis] = earned;
+      if (earned > curr[axis]) {
+        curr[axis] = earned;
+        curr.axisType[axis] = normalizeChartType(meta.type || 'A');
+      }
     });
     perSong.set(songKey, curr);
   });
@@ -469,7 +491,7 @@ function computeRadarProfileFromProgress(progress) {
   const rankings = {};
   RADAR_ORDER.forEach((axis) => {
     const topRows = songRows
-      .map((x) => ({ title: String(x.title || '').trim(), value: Number(x[axis] || 0) }))
+      .map((x) => ({ title: String(x.title || '').trim(), type: normalizeChartType(x.axisType?.[axis] || 'A'), value: Number(x[axis] || 0) }))
       .filter((x) => x.value > 0)
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
@@ -2221,14 +2243,6 @@ function renderSocialPanel() {
   const clearAllBtn = $('btnSocialFeedClearAll');
   if (!myCard || !feed || !followList) return;
   const linked = !!acc?.googleAuthUserId;
-  const settings = acc?.socialSettings || {
-    discoverability: state.settings.discoverability,
-    discoverByDjName: state.settings.discoverByDjName,
-    followPolicy: state.settings.followPolicy,
-    shareDataScope: normalizeShareDataScope(state.settings.shareDataScope),
-    goalTransferPolicy: state.settings.goalTransferPolicy || 'mutual',
-    goalTransferEnabled: (state.settings.goalTransferPolicy || 'mutual') !== 'disabled'
-  };
   const rows = socialOverviewRows || [];
   const followsAll = rows.filter((r) => r.relation_type === 'follow');
   const followingRows = followsAll.filter((r) => (r.direction || 'following') === 'following');
@@ -2243,7 +2257,11 @@ function renderSocialPanel() {
   const myMarkup = linked
     ? `<article class="social-me-card">
         <div class="social-me-banner" style="background-image:url('${esc(banner)}')">
-          <button id="btnSocialBannerSetting" type="button" class="social-me-banner-setting" title="배경 이미지 변경">⚙</button>
+          <button id="btnSocialBannerSetting" type="button" class="social-me-banner-setting" title="배경 이미지 변경">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.11-.2-.36-.28-.57-.2l-2.39.96c-.5-.38-1.05-.69-1.66-.92l-.39-2.89c-.03-.22-.22-.38-.46-.38h-4c-.24 0-.43.17-.46.38l-.39 2.89c-.61.23-1.17.53-1.67.92l-2.39-.96c-.21-.08-.46 0-.57.2L3.1 8.87c-.11.2-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.11.2.36.28.57.2l2.39-.96c.5.38 1.05.69 1.67.92l.39 2.89c.03.22.22.38.46.38h4c.24 0 .43-.17.46-.38l.39-2.89c.61-.23 1.17-.53 1.67-.92l2.39.96c.21.08.46 0 .57-.2l1.92-3.32c.11-.2.06-.47-.12-.61l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
         <div class="social-me-avatar-wrap">
           <img class="social-me-avatar" src="${esc(iconSrc(acc))}" alt="avatar" />
@@ -2257,7 +2275,6 @@ function renderSocialPanel() {
             <button type="button" class="social-me-stat social-me-stat-btn" data-open-followers="1"><div class="social-me-stat-value">${socialRelationStats.followers}</div><div class="social-me-stat-label">팔로워</div></button>
           </div>
           <button id="btnSocialOpenFollowAdd" type="button" class="social-follow-add-btn" title="팔로우 추가"><span class="social-follow-add-icon">+</span><span class="social-follow-add-text">팔로우 추가</span></button>
-          <div class="social-me-footnote">검색 공개: ${settings.discoverability === 'searchable' ? '가능' : '불가'} / DJ NAME 검색: ${settings.discoverByDjName !== false ? '가능' : '불가'}</div>
         </div>
       </article>`
     : '<div class="social-item">Google 연동 계정에서 소셜 기능을 사용할 수 있습니다.</div>';
@@ -2513,21 +2530,22 @@ function openSettingsDialog() {
 }
 
 function hideRadarAxisPopup() {
-  const pop = $('radarAxisPopup');
-  if (!pop) return;
-  pop.classList.add('hidden');
+  $('radarAxisPopup')?.classList.add('hidden');
+  $('socialPeerRadarAxisPopup')?.classList.add('hidden');
 }
 
 function showRadarAxisPopup(axisRaw, anchorEl) {
-  const pop = $('radarAxisPopup');
   const ownHost = $('accountRadarDialogBody');
   const peerHost = $('socialPeerRadarBody');
-  const host = peerHost?.contains(anchorEl) ? peerHost : ownHost;
+  const isPeer = !!peerHost?.contains(anchorEl);
+  const host = isPeer ? peerHost : ownHost;
+  const pop = isPeer ? $('socialPeerRadarAxisPopup') : $('radarAxisPopup');
   if (!pop) return;
+  hideRadarAxisPopup();
   const axis = String(axisRaw || '').toUpperCase();
   const rows = state.radarDialogProfile?.rankings?.[axis] || [];
   const listHtml = rows.length
-    ? rows.map((x, idx) => `<div class="radar-axis-popup-row"><span class="rank-no">${idx + 1}</span><span class="rank-title">${esc(x.title || '-')}</span><span class="rank-value">${Number(x.value || 0).toFixed(2)}</span></div>`).join('')
+    ? rows.map((x, idx) => `<div class="radar-axis-popup-row"><span class="rank-no">${idx + 1}</span><span class="rank-title ${radarTitleTypeClass(x.type)}">${esc(x.title || '-')}</span><span class="rank-value">${Number(x.value || 0).toFixed(2)}</span></div>`).join('')
     : '<div class="history-empty">NO DATA</div>';
   pop.innerHTML = `<div class="radar-axis-popup-head"><span class="axis-chip axis-${axis.toLowerCase()}">${radarAxisDisplayName(axis)}</span><span class="rank-head-text">TOP 10 USED FOR AVERAGE</span></div><div class="radar-axis-popup-list">${listHtml}</div>`;
   pop.classList.remove('hidden');
@@ -3661,6 +3679,16 @@ function setupEvents(){
       showRadarAxisPopup(axis, el);
     }
   });
+  $('socialPeerRadarBody')?.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-radar-axis]');
+    if (!el) return;
+    const axis = el.getAttribute('data-radar-axis') || '';
+    if (axis) {
+      e.preventDefault();
+      e.stopPropagation();
+      showRadarAxisPopup(axis, el);
+    }
+  });
   $('radarDialog')?.addEventListener('close', hideRadarAxisPopup);
   $('radarDialog')?.addEventListener('cancel', hideRadarAxisPopup);
   $('btnAccountDelete').addEventListener('click', async () => {
@@ -3713,9 +3741,13 @@ function setupEvents(){
     const popup = $('songPopup');
     const graphPopup = $('graphPopup');
     const radarAxisPopup = $('radarAxisPopup');
-    if (radarAxisPopup && !radarAxisPopup.classList.contains('hidden')) {
+    const socialRadarAxisPopup = $('socialPeerRadarAxisPopup');
+    const hasAxisPopup = (radarAxisPopup && !radarAxisPopup.classList.contains('hidden'))
+      || (socialRadarAxisPopup && !socialRadarAxisPopup.classList.contains('hidden'));
+    if (hasAxisPopup) {
       const onAxis = !!e.target.closest('[data-radar-axis]');
-      const onPopup = radarAxisPopup.contains(e.target);
+      const onPopup = !!(radarAxisPopup && radarAxisPopup.contains(e.target))
+        || !!(socialRadarAxisPopup && socialRadarAxisPopup.contains(e.target));
       if (!onAxis && !onPopup) hideRadarAxisPopup();
     }
     if (btn) {
