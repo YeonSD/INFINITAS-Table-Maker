@@ -2106,6 +2106,8 @@ button.danger {
   font-weight: 800;
   font-size: 12px;
   overflow: hidden;
+  padding: 0;
+  min-height: 0;
 }
 
 .social-avatar img {
@@ -2243,20 +2245,27 @@ button.danger {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1px solid #c4d1e4;
-  background: rgba(255, 255, 255, 0.94);
-  color: #5d7698;
+  border: 1px solid #c74e4e;
+  background: #e14b4b;
+  color: #ffffff;
   font-size: 14px;
   line-height: 1;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  transform: scale(0.72);
+  transition: opacity 120ms ease, transform 140ms ease;
   padding: 0;
+  box-shadow: 0 6px 14px rgba(196, 65, 65, 0.35);
 }
 
 .social-feed-post:hover .social-feed-close {
   opacity: 1;
   pointer-events: auto;
+  transform: scale(1);
+}
+
+.social-feed-close:hover {
+  background: #cc3b3b;
 }
 
 .social-feed-post.is-dismissing {
@@ -2565,6 +2574,73 @@ button.danger {
   box-shadow: 0 18px 40px rgba(26, 44, 69, 0.24);
   display: grid;
   gap: 6px;
+}
+
+.social-peer-menu {
+  position: fixed;
+  min-width: 132px;
+  z-index: 1710;
+}
+
+.social-peer-radar-dialog {
+  width: min(460px, 92vw);
+  padding: 0;
+}
+
+.social-peer-radar-dialog form {
+  position: relative;
+  padding: 0;
+}
+
+.dialog-close-fab {
+  position: absolute;
+  right: -16px;
+  top: -16px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid #ba3f3f;
+  background: linear-gradient(180deg, #ff6767 0%, #d43737 100%);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 18px rgba(196, 65, 65, 0.38);
+  z-index: 20;
+}
+
+.radar-dialog-body {
+  background: linear-gradient(180deg, #1b2230 0%, #111722 100%);
+  border-radius: 10px;
+  border: 1px solid #3a4b67;
+  padding: 10px 8px;
+  animation: socialCardIn 220ms ease both;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.social-radar-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.social-radar-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f0f6ff;
+  letter-spacing: 0.06em;
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  text-shadow: 0 0 8px rgba(122, 200, 255, 0.2);
+}
+
+.social-radar-user {
+  font-size: 12px;
+  color: #9fb4cd;
+  font-weight: 700;
 }
 
 #panel-social.social-enter .social-layout {
@@ -2916,15 +2992,6 @@ button.danger {
   margin-top: 0;
 }
 
-.radar-dialog .help-body {
-  background: linear-gradient(180deg, #1b2230 0%, #111722 100%);
-  border-radius: 10px;
-  border: 1px solid #3a4b67;
-  padding: 8px 6px;
-  max-width: 360px;
-  margin: 0 auto;
-}
-
 .radar-dialog .account-radar-row {
   flex-direction: column;
   align-items: center;
@@ -2939,10 +3006,16 @@ button.danger {
 
 .radar-dialog {
   width: min(420px, 92vw);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  overflow: visible;
+  box-shadow: none;
 }
 
 .radar-dialog form {
   position: relative;
+  padding: 0;
 }
 
 .radar-axis-popup {
@@ -3415,9 +3488,9 @@ body.theme-dark .social-follow-name {
 }
 
 body.theme-dark .social-feed-close {
-  background: rgba(26, 35, 49, 0.94);
-  border-color: #4a5d79;
-  color: #c7d8ef;
+  background: #c24a4a;
+  border-color: #cf6b6b;
+  color: #ffffff;
 }
 
 body.theme-dark .social-followers-popup {
@@ -3425,10 +3498,29 @@ body.theme-dark .social-followers-popup {
   border-color: #415778;
 }
 
+body.theme-dark .radar-dialog-body {
+  background: linear-gradient(180deg, #1f2a3a 0%, #1a2331 100%);
+  border-color: #415778;
+}
+
+body.theme-dark .social-radar-title {
+  color: #d6e5f8;
+}
+
+body.theme-dark .social-radar-user {
+  color: #a9bfd8;
+}
+
 body.theme-dark .social-feed-action-btn {
   background: #26354a;
   border-color: #4f6788;
   color: #d4e4f8;
+}
+
+body.theme-dark .dialog-close-fab {
+  background: linear-gradient(180deg, #f36565 0%, #bb3232 100%);
+  border-color: #d07070;
+  color: #ffffff;
 }
 
 body.theme-dark .ui-btn,

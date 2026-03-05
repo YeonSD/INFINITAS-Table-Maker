@@ -242,6 +242,19 @@
 
     </div>
 
+    <div id="socialPeerMenu" class="account-icon-menu hidden social-peer-menu">
+      <button id="btnSocialPeerRadar" type="button" class="small-btn">레이더</button>
+      <button id="btnSocialPeerCompare" type="button" class="small-btn">비교</button>
+      <button id="btnSocialPeerSendGoals" type="button" class="small-btn">목표 전송</button>
+    </div>
+
+    <dialog id="socialPeerRadarDialog" class="account-dialog help-dialog radar-dialog social-peer-radar-dialog">
+      <form method="dialog">
+        <button id="socialPeerRadarClose" type="submit" class="dialog-close-fab" aria-label="닫기">×</button>
+        <div id="socialPeerRadarBody" class="help-body radar-dialog-body"></div>
+      </form>
+    </dialog>
+
     <div id="songPopup" class="song-popup hidden">
       <div class="song-popup-title" id="popupTitle">-</div>
       <div class="song-popup-meta" id="popupMeta"></div>
@@ -378,12 +391,9 @@
     </dialog>
     <dialog id="radarDialog" class="account-dialog help-dialog radar-dialog">
       <form method="dialog">
-        <h3>SP NOTES RADAR</h3>
-        <div id="accountRadarDialogBody" class="help-body"></div>
+        <button id="radarDialogCloseTop" type="submit" class="dialog-close-fab" aria-label="닫기">×</button>
+        <div id="accountRadarDialogBody" class="help-body radar-dialog-body"></div>
         <div id="radarAxisPopup" class="radar-axis-popup hidden"></div>
-        <div class="dialog-actions">
-          <button type="submit">닫기</button>
-        </div>
       </form>
     </dialog>
     <dialog id="settingsDialog" class="account-dialog">
@@ -481,12 +491,21 @@
                 </span>
                 <span>불가</span>
               </label>
+
+              <div class="settings-subtitle">목표 전송 허용 여부</div>
               <label class="settings-item">
                 <span class="setting-check">
-                  <input id="settingGoalTransferEnabled" type="checkbox" checked />
+                  <input id="settingGoalTransferMutual" type="checkbox" checked />
                   <span class="setting-check-ui"></span>
                 </span>
-                <span>목표 전송 허용 (서로 팔로우 상태)</span>
+                <span>서로 팔로우인 경우 허용</span>
+              </label>
+              <label class="settings-item">
+                <span class="setting-check">
+                  <input id="settingGoalTransferDisabled" type="checkbox" />
+                  <span class="setting-check-ui"></span>
+                </span>
+                <span>불가</span>
               </label>
             </div>
 

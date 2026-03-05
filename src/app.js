@@ -35,6 +35,7 @@ const DEFAULT_SOCIAL_SETTINGS = Object.freeze({
   discoverByDjName: true,
   followPolicy: 'manual',
   shareDataScope: ['graphs', 'goals'],
+  goalTransferPolicy: 'mutual',
   goalTransferEnabled: true,
   rivalPolicy: 'followers'
 });
@@ -69,6 +70,7 @@ const state = {
     discoverByDjName: DEFAULT_SOCIAL_SETTINGS.discoverByDjName,
     followPolicy: DEFAULT_SOCIAL_SETTINGS.followPolicy,
     shareDataScope: [...DEFAULT_SOCIAL_SETTINGS.shareDataScope],
+    goalTransferPolicy: DEFAULT_SOCIAL_SETTINGS.goalTransferPolicy,
     goalTransferEnabled: DEFAULT_SOCIAL_SETTINGS.goalTransferEnabled,
     rivalPolicy: DEFAULT_SOCIAL_SETTINGS.rivalPolicy
   },
@@ -93,6 +95,7 @@ let socialRelationStats = { following: 0, followers: 0 };
 let socialFollowersRows = [];
 let socialFeedItems = [];
 let socialRenderCache = { my: '', feed: '', list: '', title: '' };
+let socialPeerMenuState = null;
 
 const $ = (id) => document.getElementById(id);
 const authContext = (() => {
@@ -512,9 +515,7 @@ function buildRadarHistoryEvents(prevRows, currRows, prevProgress = null, currPr
   return events;
 }
 
-function buildAccountRadarHtml({ stacked = false } = {}) {
-  const profile = computePlayerRadarProfile();
-  state.radarDialogProfile = profile;
+function buildRadarProfileHtml(profile, { stacked = false } = {}) {
   const hasData = RADAR_ORDER.some((axis) => Number(profile.radar[axis] || 0) > 0);
   if (!hasData) {
     return '<div class="account-radar-empty">NO DATA</div>';
@@ -531,6 +532,19 @@ function buildAccountRadarHtml({ stacked = false } = {}) {
     .join('');
   const layoutClass = stacked ? ' stacked' : '';
   return `<div class="account-radar-row${layoutClass}">${radarSvgHtml(profile.radar, { dominantAxis: profile.dominantAxis, compact: false, showDominantStar: false })}<div class="account-radar-bars"><div class="account-radar-vbars">${bars}</div><div class="account-radar-total">TOTAL RADAR SCORE: ${profile.total.toFixed(2)}</div></div></div>`;
+}
+
+function buildRadarDialogBodyHtml(profile, { stacked = false, subtitle = '' } = {}) {
+  const sub = subtitle ? `<div class="social-radar-user">${esc(subtitle)}</div>` : '';
+  return `<div class="social-radar-head"><div class="social-radar-title">SP NOTES RADAR</div>${sub}</div>${buildRadarProfileHtml(profile, { stacked })}`;
+}
+
+function buildAccountRadarHtml({ stacked = false } = {}) {
+  const acc = activeAcc();
+  const profile = computePlayerRadarProfile();
+  state.radarDialogProfile = profile;
+  const subtitle = `${String(acc?.djName || 'UNKNOWN')} (${String(acc?.infinitasId || '')})`;
+  return buildRadarDialogBodyHtml(profile, { stacked, subtitle });
 }
 
 function authStatusText() {
@@ -657,7 +671,8 @@ async function syncLinkedAccountToCloud(reason = 'manual') {
       discoverByDjName: state.settings.discoverByDjName,
       followPolicy: state.settings.followPolicy,
       shareDataScope: normalizeShareDataScope(state.settings.shareDataScope),
-      goalTransferEnabled: state.settings.goalTransferEnabled !== false,
+      goalTransferPolicy: state.settings.goalTransferPolicy || 'mutual',
+      goalTransferEnabled: (state.settings.goalTransferPolicy || 'mutual') !== 'disabled',
       rivalPolicy: state.settings.rivalPolicy
     },
     updated_at: new Date().toISOString(),
@@ -974,6 +989,11 @@ function iconSrc(acc) { return (acc && acc.iconDataUrl) || DEFAULT_ICON_SRC; }
 
 function normalizeSettings(s) {
   const src = (s && typeof s === 'object') ? s : {};
+  const goalTransferPolicy = src.goalTransferPolicy === 'disabled'
+    ? 'disabled'
+    : src.goalTransferEnabled === false
+      ? 'disabled'
+      : 'mutual';
   return {
     showUpdateGoalCards: src.showUpdateGoalCards !== false,
     enableHistoryRollback: src.enableHistoryRollback !== false,
@@ -981,7 +1001,8 @@ function normalizeSettings(s) {
     discoverByDjName: src.discoverByDjName !== false,
     followPolicy: ['auto', 'manual', 'disabled'].includes(src.followPolicy) ? src.followPolicy : 'manual',
     shareDataScope: normalizeShareDataScope(src.shareDataScope),
-    goalTransferEnabled: src.goalTransferEnabled !== false,
+    goalTransferPolicy,
+    goalTransferEnabled: goalTransferPolicy !== 'disabled',
     rivalPolicy: ['all', 'followers', 'disabled'].includes(src.rivalPolicy) ? src.rivalPolicy : 'followers'
   };
 }
@@ -993,7 +1014,8 @@ function normalizeSocialSettings(s) {
     discoverByDjName: n.discoverByDjName,
     followPolicy: n.followPolicy,
     shareDataScope: normalizeShareDataScope(n.shareDataScope),
-    goalTransferEnabled: n.goalTransferEnabled !== false,
+    goalTransferPolicy: n.goalTransferPolicy,
+    goalTransferEnabled: n.goalTransferPolicy !== 'disabled',
     rivalPolicy: n.rivalPolicy
   };
 }
@@ -1748,18 +1770,26 @@ function renderSettings() {
   $('settingShareGraphs').checked = picked.has('graphs');
   $('settingShareGoals').checked = picked.has('goals');
   $('settingShareNone').checked = picked.has('none');
-  $('settingGoalTransferEnabled').checked = state.settings.goalTransferEnabled !== false;
+  $('settingGoalTransferMutual').checked = (state.settings.goalTransferPolicy || 'mutual') === 'mutual';
+  $('settingGoalTransferDisabled').checked = (state.settings.goalTransferPolicy || 'mutual') === 'disabled';
   setSettingsTab(state.settingsTab || 'general');
   renderAuthStatus();
 }
 
 function normalizeSocialCheckboxState(triggerId = '') {
   const followIds = ['settingFollowPolicyManual', 'settingFollowPolicyAuto', 'settingFollowPolicyDisabled'];
+  const goalTransferIds = ['settingGoalTransferMutual', 'settingGoalTransferDisabled'];
   if (followIds.includes(triggerId)) {
     followIds.forEach((id) => {
       if (id !== triggerId) $(id).checked = false;
     });
     if (!followIds.some((id) => $(id).checked)) $('settingFollowPolicyManual').checked = true;
+  }
+  if (goalTransferIds.includes(triggerId)) {
+    goalTransferIds.forEach((id) => {
+      if (id !== triggerId) $(id).checked = false;
+    });
+    if (!goalTransferIds.some((id) => $(id).checked)) $('settingGoalTransferMutual').checked = true;
   }
   const all = $('settingShareAllData');
   const none = $('settingShareNone');
@@ -1863,10 +1893,6 @@ async function refreshSocialOverview() {
       following: followingRows.length,
       followers: followerRows.length
     };
-    if (!followingRows.length && !followerRows.length) {
-      const fallbackCount = followsAll.length;
-      socialRelationStats = { following: fallbackCount, followers: fallbackCount };
-    }
     await loadSocialFeedEvents(client);
   }
   renderSocialPanel();
@@ -2065,13 +2091,66 @@ function openFollowersPopupAt(clientX, clientY, followerRows) {
   popup.style.top = `${top}px`;
 }
 
+function hideSocialPeerMenu() {
+  socialPeerMenuState = null;
+  $('socialPeerMenu')?.classList.add('hidden');
+}
+
+function openSocialPeerMenu(clientX, clientY, peer) {
+  const menu = $('socialPeerMenu');
+  if (!menu || !peer?.peer_user_id) return;
+  socialPeerMenuState = {
+    peer_user_id: String(peer.peer_user_id || ''),
+    dj_name: String(peer.dj_name || 'UNKNOWN'),
+    infinitas_id: String(peer.infinitas_id || '')
+  };
+  menu.classList.remove('hidden');
+  const margin = 10;
+  const rect = menu.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  const left = Math.min(Math.max(margin, clientX + 8), maxLeft);
+  const top = Math.min(Math.max(margin, clientY + 8), maxTop);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+async function openSocialPeerRadarDialog(peer) {
+  const pid = String(peer?.peer_user_id || '');
+  if (!pid) return;
+  const client = getSupabaseClient();
+  if (!client) return;
+  const { data, error } = await client.rpc('get_follow_tracker_rows', { p_peer_user_id: pid });
+  if (error) {
+    toast(`상대 레이더 조회 실패: ${error.message || error}`, 'error');
+    return;
+  }
+  const body = $('socialPeerRadarBody');
+  const dialog = $('socialPeerRadarDialog');
+  if (!body || !dialog) return;
+  let rows = [];
+  const rawRows = data?.tracker_rows ?? data?.[0]?.tracker_rows ?? [];
+  if (Array.isArray(rawRows)) rows = rawRows;
+  else if (typeof rawRows === 'string') {
+    try { rows = JSON.parse(rawRows); } catch { rows = []; }
+  }
+  const profile = computeRadarProfileFromRows(rows);
+  state.radarDialogProfile = profile;
+  body.innerHTML = buildRadarDialogBodyHtml(profile, {
+    stacked: true,
+    subtitle: `${String(peer.dj_name || 'UNKNOWN')} (${String(peer.infinitas_id || '')})`
+  });
+  hideRadarAxisPopup();
+  if (!dialog.open) dialog.showModal();
+}
+
 async function sendGoalsToSelectedUser() {
   const acc = activeAcc();
   if (!acc?.googleAuthUserId) {
     toast('Google 연동 계정에서만 가능합니다.', 'warning');
     return;
   }
-  if (state.settings.goalTransferEnabled === false) {
+  if ((state.settings.goalTransferPolicy || 'mutual') === 'disabled') {
     toast('설정에서 목표 전송 허용을 켜야 전송할 수 있습니다.', 'warning');
     return;
   }
@@ -2147,7 +2226,8 @@ function renderSocialPanel() {
     discoverByDjName: state.settings.discoverByDjName,
     followPolicy: state.settings.followPolicy,
     shareDataScope: normalizeShareDataScope(state.settings.shareDataScope),
-    goalTransferEnabled: state.settings.goalTransferEnabled !== false
+    goalTransferPolicy: state.settings.goalTransferPolicy || 'mutual',
+    goalTransferEnabled: (state.settings.goalTransferPolicy || 'mutual') !== 'disabled'
   };
   const rows = socialOverviewRows || [];
   const followsAll = rows.filter((r) => r.relation_type === 'follow');
@@ -2222,11 +2302,11 @@ function renderSocialPanel() {
       const hasIcon = !!String(profile.icon || '').trim();
       return `
       <div class="social-follow-user">
-        <div class="social-avatar social-avatar-plain">
+        <button type="button" class="social-avatar social-avatar-plain" data-peer-avatar="${esc(pid)}" data-peer-dj-name="${esc(row.dj_name || 'UNKNOWN')}" data-peer-infinitas-id="${esc(row.infinitas_id || '')}">
           ${hasIcon
             ? `<img src="${esc(profile.icon)}" alt="${esc(row.dj_name || 'user')}" />`
             : '<span class="social-avatar-person">👤</span>'}
-        </div>
+        </button>
         <div>
           <div class="social-follow-name">${esc(row.dj_name || 'UNKNOWN')}</div>
           <div class="social-item-sub">${esc(row.infinitas_id || '')}</div>
@@ -2440,7 +2520,9 @@ function hideRadarAxisPopup() {
 
 function showRadarAxisPopup(axisRaw, anchorEl) {
   const pop = $('radarAxisPopup');
-  const host = $('accountRadarDialogBody');
+  const ownHost = $('accountRadarDialogBody');
+  const peerHost = $('socialPeerRadarBody');
+  const host = peerHost?.contains(anchorEl) ? peerHost : ownHost;
   if (!pop) return;
   const axis = String(axisRaw || '').toUpperCase();
   const rows = state.radarDialogProfile?.rankings?.[axis] || [];
@@ -2872,6 +2954,7 @@ function setActivePanel(nextPanel) {
     });
   } else {
     closeFollowersPopup();
+    hideSocialPeerMenu();
   }
 }
 
@@ -2995,7 +3078,6 @@ async function validateImageFile(file, mode = 'icon') {
 async function openBannerPickerWithGuide() {
   const ok = await uiConfirm(
     [
-      '배경 이미지 파일 조건',
       `- 형식: JPG / PNG / WEBP`,
       `- 용량: 최대 ${Math.round(BANNER_MAX_BYTES / 1024 / 1024)}MB`,
       `- 크기: 최대 ${BANNER_MAX_WIDTH}x${BANNER_MAX_HEIGHT}px`
@@ -3589,6 +3671,7 @@ function setupEvents(){
     hideSongPopup();
     hideGraphPopup();
     closeFollowersPopup();
+    hideSocialPeerMenu();
   }, true);
 
   $('accountSelect').addEventListener('change', async (e) => {
@@ -3608,7 +3691,8 @@ function setupEvents(){
       state.settings.discoverByDjName = s.discoverByDjName !== false;
       state.settings.followPolicy = s.followPolicy;
       state.settings.shareDataScope = [...s.shareDataScope];
-      state.settings.goalTransferEnabled = s.goalTransferEnabled !== false;
+      state.settings.goalTransferPolicy = s.goalTransferPolicy || (s.goalTransferEnabled === false ? 'disabled' : 'mutual');
+      state.settings.goalTransferEnabled = (state.settings.goalTransferPolicy || 'mutual') !== 'disabled';
       state.settings.rivalPolicy = s.rivalPolicy;
     }
     authContext.set({ accountId: v || null });
@@ -3647,6 +3731,12 @@ function setupEvents(){
       const inPopup = followersPopup.contains(e.target);
       const opener = !!e.target.closest('[data-open-followers]');
       if (!inPopup && !opener) closeFollowersPopup();
+    }
+    const peerMenu = $('socialPeerMenu');
+    if (peerMenu && !peerMenu.classList.contains('hidden')) {
+      const inMenu = peerMenu.contains(e.target);
+      const opener = !!e.target.closest('[data-peer-avatar]');
+      if (!inMenu && !opener) hideSocialPeerMenu();
     }
     if (!$('accountIconMenu').contains(e.target)) { $('accountIconMenu').classList.add('hidden'); }
     if (!e.target.closest('.it-select') && !e.target.closest('.it-search')) closeAllEnhancedSelect();
@@ -3783,7 +3873,8 @@ function setupEvents(){
         ? 'disabled'
         : 'manual';
     state.settings.shareDataScope = selectedShareScopeFromUi();
-    state.settings.goalTransferEnabled = $('settingGoalTransferEnabled')?.checked !== false;
+    state.settings.goalTransferPolicy = $('settingGoalTransferDisabled')?.checked ? 'disabled' : 'mutual';
+    state.settings.goalTransferEnabled = state.settings.goalTransferPolicy !== 'disabled';
     const acc = activeAcc();
     if (acc) {
       acc.socialSettings = {
@@ -3791,7 +3882,8 @@ function setupEvents(){
         discoverByDjName: state.settings.discoverByDjName,
         followPolicy: state.settings.followPolicy,
         shareDataScope: [...state.settings.shareDataScope],
-        goalTransferEnabled: state.settings.goalTransferEnabled !== false
+        goalTransferPolicy: state.settings.goalTransferPolicy,
+        goalTransferEnabled: state.settings.goalTransferPolicy !== 'disabled'
       };
     }
     await saveState();
@@ -3810,7 +3902,8 @@ function setupEvents(){
     'settingShareGraphs',
     'settingShareGoals',
     'settingShareNone',
-    'settingGoalTransferEnabled',
+    'settingGoalTransferMutual',
+    'settingGoalTransferDisabled',
   ].forEach((id) => {
     $(id)?.addEventListener('change', () => {
       normalizeSocialCheckboxState(id);
@@ -3997,6 +4090,32 @@ function setupEvents(){
       toast(`팔로우 요청 실패: ${err.message || err}`, 'error');
     }
   });
+  $('socialFollowList')?.addEventListener('click', async (e) => {
+    const avatarBtn = e.target.closest('[data-peer-avatar]');
+    if (!avatarBtn) return;
+    const peer = {
+      peer_user_id: avatarBtn.getAttribute('data-peer-avatar') || '',
+      dj_name: avatarBtn.getAttribute('data-peer-dj-name') || 'UNKNOWN',
+      infinitas_id: avatarBtn.getAttribute('data-peer-infinitas-id') || ''
+    };
+    openSocialPeerMenu(e.clientX, e.clientY, peer);
+  });
+  $('btnSocialPeerRadar')?.addEventListener('click', async () => {
+    const peer = socialPeerMenuState;
+    hideSocialPeerMenu();
+    if (!peer) return;
+    await openSocialPeerRadarDialog(peer);
+  });
+  $('btnSocialPeerCompare')?.addEventListener('click', () => {
+    hideSocialPeerMenu();
+    toast('비교 기능은 다음 단계에서 연결됩니다.', 'info');
+  });
+  $('btnSocialPeerSendGoals')?.addEventListener('click', () => {
+    hideSocialPeerMenu();
+    toast('목표 전송 바로가기 기능은 다음 단계에서 연결됩니다.', 'info');
+  });
+  $('socialPeerRadarDialog')?.addEventListener('close', hideRadarAxisPopup);
+  $('socialPeerRadarDialog')?.addEventListener('cancel', hideRadarAxisPopup);
 
   $('btnGoogleLink').addEventListener('click', linkGoogleAccount);
   $('btnGoogleUnlink')?.addEventListener('click', unlinkGoogleAccount);
@@ -4034,7 +4153,8 @@ async function init(){
     state.settings.discoverByDjName = s.discoverByDjName !== false;
     state.settings.followPolicy = s.followPolicy;
     state.settings.shareDataScope = [...s.shareDataScope];
-    state.settings.goalTransferEnabled = s.goalTransferEnabled !== false;
+    state.settings.goalTransferPolicy = s.goalTransferPolicy || (s.goalTransferEnabled === false ? 'disabled' : 'mutual');
+    state.settings.goalTransferEnabled = (state.settings.goalTransferPolicy || 'mutual') !== 'disabled';
     state.settings.rivalPolicy = s.rivalPolicy;
   }
   authContext.set({ accountId: state.activeAccountId || null });
