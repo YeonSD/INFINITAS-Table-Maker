@@ -1,4 +1,5 @@
-﻿const html2canvas = window.html2canvas;
+﻿import { HELP_CONTENT_HTML } from './helpContent.js';
+const html2canvas = window.html2canvas;
 const createClient = window.supabase?.createClient;
 const SUPABASE_URL = 'https://abmnggpjcliherdzuyqw.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_x5O5BK3XcyJ2yuHt2WDQKQ_Y2GvhK82';
@@ -34,7 +35,7 @@ const DEFAULT_SOCIAL_SETTINGS = Object.freeze({
   discoverability: 'searchable',
   discoverByDjName: true,
   followPolicy: 'manual',
-  shareDataScope: ['graphs', 'goals'],
+  shareDataScope: ['all', 'graphs', 'goals'],
   goalTransferPolicy: 'mutual',
   goalTransferEnabled: true,
   rivalPolicy: 'followers'
@@ -96,6 +97,8 @@ let socialFollowersRows = [];
 let socialFeedItems = [];
 let socialRenderCache = { my: '', feed: '', list: '', title: '' };
 let socialPeerMenuState = null;
+let goalSendContext = null;
+let songGoalChart = null;
 
 const $ = (id) => document.getElementById(id);
 const authContext = (() => {
@@ -222,6 +225,10 @@ function normalizeRadarData(radar) {
 
 function radarAxisDisplayName(axis) {
   return String(axis || '').toUpperCase() === 'SOFLAN' ? 'SOF-LAN' : String(axis || '').toUpperCase();
+}
+
+function radarAxisCssClass(axis) {
+  return `axis-${String(axis || '').toLowerCase()}`;
 }
 
 function dominantRadarAxis(radar) {
@@ -592,7 +599,10 @@ function renderAuthStatus() {
     linkBtn.title = linked ? '이미 연동된 계정입니다.' : 'Google 연동';
   }
   const unlinkBtn = $('btnGoogleUnlink');
-  if (unlinkBtn) unlinkBtn.disabled = !linked;
+  if (unlinkBtn) {
+    unlinkBtn.disabled = !linked;
+    unlinkBtn.classList.toggle('hidden', !linked);
+  }
 }
 
 function getSupabaseClient() {
@@ -1730,6 +1740,7 @@ function renderGoals(){
   const list=$('goalList');
   if(!acc){ list.innerHTML='<div class="goal-item">계정을 먼저 생성하세요.</div>'; return; }
   if(!(acc.goals||[]).length){ list.innerHTML='<div class="goal-item">설정된 목표가 없습니다.</div>'; return; }
+  const canSocialSend = !!acc.googleAuthUserId;
   const progress = progressMap();
   list.classList.add('animated');
   list.innerHTML=acc.goals.map((g, idx)=>{
@@ -1750,7 +1761,10 @@ function renderGoals(){
           <span class="goal-pill">출처: ${esc((g.source || '').trim() || acc.djName)}</span>
           <span class="goal-pill ${done?'goal-status-achieved':'goal-status-pending'}">${done?'달성':'진행중'}</span>
         </div>
-        <button data-goal-id="${esc(g.id)}" class="small-btn btn-delete-goal">삭제</button>
+        <div class="goal-actions">
+          ${canSocialSend ? `<button data-goal-send="${esc(g.id)}" class="small-btn btn-send-goal">목표 전송</button>` : ''}
+          <button data-goal-id="${esc(g.id)}" class="small-btn btn-delete-goal">삭제</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1796,6 +1810,12 @@ function renderSettings() {
   $('settingGoalTransferDisabled').checked = (state.settings.goalTransferPolicy || 'mutual') === 'disabled';
   setSettingsTab(state.settingsTab || 'general');
   renderAuthStatus();
+}
+
+function renderHelpContent() {
+  const body = $('helpContentBody');
+  if (!body) return;
+  body.innerHTML = HELP_CONTENT_HTML;
 }
 
 function normalizeSocialCheckboxState(triggerId = '') {
@@ -2347,6 +2367,159 @@ function renderSocialPanel() {
   }
 }
 
+function levelLabelFromTable(tableName) {
+  if (String(tableName).startsWith('SP10')) return 'SP10';
+  if (String(tableName).startsWith('SP11')) return 'SP11';
+  if (String(tableName).startsWith('SP12')) return 'SP12';
+  return String(tableName || '-');
+}
+
+function mutualFollowPeers() {
+  const byPeer = new Map();
+  (socialOverviewRows || []).forEach((row) => {
+    if (row?.relation_type !== 'follow') return;
+    const pid = String(row.peer_user_id || '');
+    if (!pid) return;
+    const curr = byPeer.get(pid) || {
+      peer_user_id: pid,
+      dj_name: row.dj_name || 'UNKNOWN',
+      infinitas_id: row.infinitas_id || '',
+      icon_data_url: row.icon_data_url || '',
+      following: false,
+      follower: false
+    };
+    if ((row.direction || 'following') === 'following') curr.following = true;
+    if ((row.direction || 'following') === 'follower') curr.follower = true;
+    byPeer.set(pid, curr);
+  });
+  return [...byPeer.values()].filter((x) => x.following && x.follower);
+}
+
+async function fetchPeerTrackerRows(peerUserId) {
+  const client = getSupabaseClient();
+  if (!client) return [];
+  const { data, error } = await client.rpc('get_follow_tracker_rows', { p_peer_user_id: String(peerUserId || '') });
+  if (error) throw error;
+  const rawRows = data?.tracker_rows ?? data?.[0]?.tracker_rows ?? [];
+  if (Array.isArray(rawRows)) return rawRows;
+  if (typeof rawRows === 'string') {
+    try { return JSON.parse(rawRows); } catch { return []; }
+  }
+  return [];
+}
+
+function goalAchievedFromTrackerRows(goal, trackerRows) {
+  const idx = buildRowIndex(trackerRows || []);
+  const row = findRowByTitle(idx, goal.title);
+  const stats = rowStats(row, goal.chartType);
+  const scoreTierValue = scoreTier(Number(stats.exScore || 0), Number(stats.noteCount || 0), stats.lamp);
+  const key = `${goal.table}|${titleKey(goal.title)}|${goal.chartType}`;
+  const pseudo = {
+    [key]: {
+      lamp: stats.lamp,
+      clearStatus: clearStatus(stats.lamp),
+      exScore: Number(stats.exScore || 0),
+      scoreTier: scoreTierValue || ''
+    }
+  };
+  return goalAchieved(goal, pseudo);
+}
+
+function renderGoalSendList() {
+  const list = $('goalSendList');
+  if (!list) return;
+  const peers = mutualFollowPeers();
+  if (!peers.length) {
+    list.innerHTML = '<div class="history-empty">서로 팔로우 상태인 대상이 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = peers.map((p) => {
+    const hasIcon = !!String(p.icon_data_url || '').trim();
+    return `
+      <div class="social-follow-user">
+        <div class="social-avatar social-avatar-plain">
+          ${hasIcon ? `<img src="${esc(p.icon_data_url)}" alt="${esc(p.dj_name || 'user')}" />` : '<span class="social-avatar-person">👤</span>'}
+        </div>
+        <div>
+          <div class="social-follow-name">${esc(p.dj_name || 'UNKNOWN')}</div>
+          <div class="social-item-sub">${esc(p.infinitas_id || '')}</div>
+        </div>
+        <button type="button" class="social-follow-back" data-goal-send-peer="${esc(p.peer_user_id)}">전송</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function openGoalSendDialog(goalId) {
+  goalSendContext = { goalId: String(goalId || '') };
+  const dialog = $('goalSendDialog');
+  if (!dialog) return;
+  renderGoalSendList();
+  if (!dialog.open) dialog.showModal();
+}
+
+async function openSocialCompareDialog(peer) {
+  const body = $('socialCompareBody');
+  const dialog = $('socialCompareDialog');
+  if (!body || !dialog || !peer?.peer_user_id) return;
+  let rows = [];
+  try {
+    rows = await fetchPeerTrackerRows(peer.peer_user_id);
+  } catch (e) {
+    toast(`비교 데이터 조회 실패: ${e.message || e}`, 'error');
+    return;
+  }
+  const ownRows = activeAcc()?.trackerRows || [];
+  const ownIdx = buildRowIndex(ownRows);
+  const peerIdx = buildRowIndex(rows);
+  const ownRadar = computePlayerRadarProfile();
+  const peerRadar = computeRadarProfileFromRows(rows);
+  const radarRows = RADAR_ORDER.map((axis) => {
+    const me = Number(ownRadar.radar?.[axis] || 0);
+    const other = Number(peerRadar.radar?.[axis] || 0);
+    const diff = truncate2(me - other);
+    const cls = radarAxisCssClass(axis);
+    const diffClass = diff > 0 ? 'plus' : diff < 0 ? 'minus' : 'zero';
+    const sign = diff > 0 ? '+' : '';
+    return `<div class="social-compare-radar-row"><span class="${cls}">${radarAxisDisplayName(axis)}</span><span class="social-compare-radar-val">${me.toFixed(2)}</span><span class="social-compare-radar-val">${other.toFixed(2)}</span><span class="social-compare-diff ${diffClass}">${sign}${diff.toFixed(2)}</span></div>`;
+  }).join('');
+  const bucket = new Map();
+  const ensureBucket = (k) => {
+    if (!bucket.has(k)) bucket.set(k, { score: { w: 0, d: 0, l: 0 }, lamp: { w: 0, d: 0, l: 0 } });
+    return bucket.get(k);
+  };
+  Object.entries(state.tableViews || {}).forEach(([tableName, view]) => {
+    const level = levelLabelFromTable(tableName);
+    const b = ensureBucket(level);
+    (view?.flatCharts || []).forEach((chart) => {
+      const own = rowStats(findRowByTitle(ownIdx, chart.title), chart.type);
+      const peerS = rowStats(findRowByTitle(peerIdx, chart.title), chart.type);
+      if (Number(own.noteCount || 0) <= 0 || Number(peerS.noteCount || 0) <= 0) return;
+      const ownScore = Number(own.exScore || 0);
+      const peerScore = Number(peerS.exScore || 0);
+      const ownLamp = LAMP_ORDER[own.lamp] ?? 0;
+      const peerLamp = LAMP_ORDER[peerS.lamp] ?? 0;
+      const scoreKey = ownScore > peerScore ? 'w' : ownScore < peerScore ? 'l' : 'd';
+      const lampKey = ownLamp > peerLamp ? 'w' : ownLamp < peerLamp ? 'l' : 'd';
+      b.score[scoreKey] += 1;
+      b.lamp[lampKey] += 1;
+    });
+  });
+  const levelOrder = ['SP10', 'SP11', 'SP12'];
+  const levelRows = levelOrder.filter((k) => bucket.has(k)).map((k) => {
+    const v = bucket.get(k);
+    return `<div class="social-compare-level-row"><span class="social-compare-level-key">${esc(k)}</span><span class="social-compare-level-value">${v.score.w}/${v.score.d}/${v.score.l}</span><span class="social-compare-level-value">${v.lamp.w}/${v.lamp.d}/${v.lamp.l}</span></div>`;
+  }).join('');
+  body.innerHTML = `
+    <div class="social-compare-head"><strong>${esc(activeAcc()?.djName || 'ME')}</strong><span>vs</span><strong>${esc(peer.dj_name || 'PEER')}</strong></div>
+    <div class="social-compare-grid">
+      <section class="social-compare-card"><div class="social-compare-title">노트 레이더 차이 (나-상대)</div>${radarRows}</section>
+      <section class="social-compare-card"><div class="social-compare-title">레벨별 승/무/패</div><div class="social-compare-level-head"><span>LEVEL</span><span>SCORE</span><span>RAMP</span></div>${levelRows || '<div class="history-empty">데이터 없음</div>'}</section>
+    </div>
+  `;
+  if (!dialog.open) dialog.showModal();
+}
+
 function formatInfinitasIdDisplay(inputRaw) {
   const digits = String(inputRaw || '').replace(/\D/g, '').slice(0, 12);
   if (!digits) return '';
@@ -2385,7 +2558,9 @@ function renderSocialSearchHit(row) {
   const box = $('socialSearchResult');
   const pop = document.querySelector('#socialFollowAddForm .social-search-pop');
   if (!box) return;
-  if (!row?.auth_user_id) {
+  const rows = Array.isArray(row) ? row : (row ? [row] : []);
+  const validRows = rows.filter((x) => x?.auth_user_id);
+  if (!validRows.length) {
     socialSearchTarget = null;
     if (pop) pop.classList.remove('has-result');
     box.classList.remove('hidden');
@@ -2393,33 +2568,34 @@ function renderSocialSearchHit(row) {
     return;
   }
   const acc = activeAcc();
-  const targetId = String(row.auth_user_id || '');
-  const alreadyFollowing = (socialOverviewRows || []).some((r) =>
-    r.relation_type === 'follow'
-    && (r.direction || 'following') === 'following'
-    && String(r.peer_user_id || '') === targetId
-  );
-  const isSelf = !!acc?.googleAuthUserId && String(acc.googleAuthUserId) === targetId;
-  socialSearchTarget = row;
-  const disabled = alreadyFollowing || isSelf;
-  const btnLabel = '+';
-  const hasIcon = !!String(row.icon_data_url || '').trim();
+  socialSearchTarget = validRows[0] || null;
   if (pop) pop.classList.add('has-result');
   box.classList.remove('hidden');
-  box.innerHTML = `
-    <div class="social-search-hit">
-      <div class="social-follow-user">
-        <div class="social-avatar social-avatar-plain">
-          ${hasIcon ? `<img src="${esc(row.icon_data_url)}" alt="${esc(row.dj_name || 'user')}" />` : '<span class="social-avatar-person">👤</span>'}
+  box.innerHTML = `<div class="social-search-hit-list">${validRows.map((item) => {
+    const targetId = String(item.auth_user_id || '');
+    const alreadyFollowing = (socialOverviewRows || []).some((r) =>
+      r.relation_type === 'follow'
+      && (r.direction || 'following') === 'following'
+      && String(r.peer_user_id || '') === targetId
+    );
+    const isSelf = !!acc?.googleAuthUserId && String(acc.googleAuthUserId) === targetId;
+    const disabled = alreadyFollowing || isSelf;
+    const hasIcon = !!String(item.icon_data_url || '').trim();
+    return `
+      <div class="social-search-hit">
+        <div class="social-follow-user">
+          <div class="social-avatar social-avatar-plain">
+            ${hasIcon ? `<img src="${esc(item.icon_data_url)}" alt="${esc(item.dj_name || 'user')}" />` : '<span class="social-avatar-person">👤</span>'}
+          </div>
+          <div>
+            <div class="social-follow-name">${esc(item.dj_name || 'UNKNOWN')}</div>
+            <div class="social-item-sub">${esc(item.infinitas_id || '')}</div>
+          </div>
+          <button type="button" class="social-search-add-btn ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} data-search-follow="${esc(targetId)}">+</button>
         </div>
-        <div>
-          <div class="social-follow-name">${esc(row.dj_name || 'UNKNOWN')}</div>
-          <div class="social-item-sub">${esc(row.infinitas_id || '')}</div>
-        </div>
-        <button type="button" class="social-search-add-btn ${disabled ? 'disabled' : ''}" ${disabled ? 'disabled' : ''} data-search-follow="${esc(targetId)}">${btnLabel}</button>
       </div>
-    </div>
-  `;
+    `;
+  }).join('')}</div>`;
 }
 
 function clearRefluxGoalCards() {
@@ -2885,15 +3061,18 @@ async function unlinkGoogleAccount() {
     return;
   }
   const uid = acc.googleAuthUserId;
-  const delState = await client.from('account_states').delete().eq('auth_user_id', uid);
-  if (delState.error) {
-    toast(`클라우드 상태 삭제 실패: ${delState.error.message}`, 'error');
-    return;
-  }
-  const delUser = await client.from('users').delete().eq('auth_user_id', uid);
-  if (delUser.error) {
-    toast(`클라우드 프로필 삭제 실패: ${delUser.error.message}`, 'error');
-    return;
+  const purge = await client.rpc('purge_my_social_data');
+  if (purge.error) {
+    const delState = await client.from('account_states').delete().eq('auth_user_id', uid);
+    if (delState.error) {
+      toast(`클라우드 상태 삭제 실패: ${delState.error.message}`, 'error');
+      return;
+    }
+    const delUser = await client.from('users').delete().eq('auth_user_id', uid);
+    if (delUser.error) {
+      toast(`클라우드 프로필 삭제 실패: ${delUser.error.message}`, 'error');
+      return;
+    }
   }
   try { await client.auth.signOut(); } catch { /* ignore */ }
   acc.googleAuthUserId = '';
@@ -2935,6 +3114,30 @@ async function fetchSongSocialContext(chart) {
   return Array.isArray(data) ? data : [];
 }
 
+function syncSongGoalTargetVisibility() {
+  const kind = $('songGoalKind')?.value || 'CLEAR';
+  document.querySelectorAll('.song-goal-target').forEach((el) => el.classList.add('hidden'));
+  if (kind === 'SCORE') $('songGoalScore')?.classList.remove('hidden');
+  else if (kind === 'RANK') $('songGoalRank')?.classList.remove('hidden');
+  else $('songGoalLamp')?.classList.remove('hidden');
+}
+
+function openSongGoalDialog(chart) {
+  const acc = activeAcc();
+  if (!acc?.googleAuthUserId) {
+    toast('소셜 연동 계정에서만 사용할 수 있습니다.', 'info');
+    return;
+  }
+  songGoalChart = chart;
+  $('songGoalKind').value = 'CLEAR';
+  $('songGoalLamp').value = 'HC';
+  $('songGoalScore').value = '';
+  $('songGoalRank').value = 'AA';
+  syncSongGoalTargetVisibility();
+  $('songGoalMeta').textContent = `${chart.title} [${chart.type}]`;
+  $('songGoalDialog')?.showModal();
+}
+
 function songSocialSectionHtml(kind, rows, chart) {
   const title = '팔로우 영역';
   const filtered = rows.filter((x) => x.kind === kind);
@@ -2952,7 +3155,11 @@ function songSocialSectionHtml(kind, rows, chart) {
 
 async function showSongPopup(chart,e){
   const p=$('songPopup');
-  $('popupTitle').textContent=`${chart.title} [${chart.type}]`;
+  const acc = activeAcc();
+  const goalBtn = acc?.googleAuthUserId
+    ? `<button type="button" class="song-goal-open-btn" data-song-goal="${esc(chart.key)}">목표 설정</button>`
+    : '';
+  $('popupTitle').innerHTML=`<span>${esc(`${chart.title} [${chart.type}]`)}</span>${goalBtn}`;
   const bpmText = chart.bpm ? esc(chart.bpm) : '-';
   const metaNotes = Number(chart.metaNotes || 0) > 0 ? Number(chart.metaNotes) : '-';
   const typeText = chart.metaType ? esc(chart.metaType) : '-';
@@ -3260,14 +3467,6 @@ function mergeImportedAccount(imported) {
   }
   if (state.accounts.length >= MAX_ACCOUNTS) return { error: `계정은 최대 ${MAX_ACCOUNTS}개까지 생성할 수 있습니다.` };
   if (state.accounts.some((a) => a.id === normalized.id)) normalized.id = crypto.randomUUID();
-  const existsName = (name) => state.accounts.some((a) => a.djName.toLowerCase() === String(name || '').toLowerCase());
-  if (existsName(normalized.djName)) {
-    const base = normalized.djName;
-    let idx = 2;
-    while (existsName(`${base} (${idx})`)) idx += 1;
-    normalized.djName = `${base} (${idx})`;
-    normalized.name = normalized.djName;
-  }
   state.accounts.push(normalized);
   state.activeAccountId = normalized.id;
   state.selectedHistoryId = null;
@@ -3289,7 +3488,6 @@ async function createAccountFlow(allowCancel=true){
     return true;
   }
   if(state.accounts.length>=MAX_ACCOUNTS){ toast(`계정은 최대 ${MAX_ACCOUNTS}개까지 생성할 수 있습니다.`); return false; }
-  if(state.accounts.some((a)=>a.djName.toLowerCase()===r.djName.toLowerCase())){ toast('같은 DJ NAME의 계정이 이미 있습니다.'); return false; }
   const a=ensureAcc({djName:r.djName, infinitasId:r.infinitasId, iconDataUrl:r.iconDataUrl});
   state.accounts.push(a); state.activeAccountId=a.id; state.selectedHistoryId=null; await saveState(); refreshAll(); toast(`${a.djName} 계정 생성 완료`); return true;
 }
@@ -3303,11 +3501,6 @@ async function editAccountFlow(){
     initial: { djName: acc.djName, infinitasId: acc.infinitasId, iconDataUrl: acc.iconDataUrl }
   });
   if (!r) return;
-  const dup = state.accounts.find((a) => a.id !== acc.id && a.djName.toLowerCase() === r.djName.toLowerCase());
-  if (dup) {
-    toast('같은 DJ NAME의 계정이 이미 있습니다.');
-    return;
-  }
   acc.djName = r.djName;
   acc.name = r.djName;
   acc.infinitasId = r.infinitasId;
@@ -3814,6 +4007,7 @@ function setupEvents(){
   document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.song-button');
     const popup = $('songPopup');
+    const songGoalDialog = $('songGoalDialog');
     const graphPopup = $('graphPopup');
     const radarAxisPopup = $('radarAxisPopup');
     const socialRadarAxisPopup = $('socialPeerRadarAxisPopup');
@@ -3831,7 +4025,7 @@ function setupEvents(){
       if (chart) showSongPopup(chart, e);
       return;
     }
-    if (!popup.classList.contains('hidden') && !popup.contains(e.target)) hideSongPopup();
+    if (!popup.classList.contains('hidden') && !popup.contains(e.target) && !songGoalDialog?.open) hideSongPopup();
     if (!graphPopup.classList.contains('hidden') && !graphPopup.contains(e.target) && !e.target.closest('.stack-track') && !e.target.closest('.legend-chip')) hideGraphPopup();
     const followersPopup = $('socialFollowersPopup');
     if (followersPopup && !followersPopup.classList.contains('hidden')) {
@@ -3958,7 +4152,21 @@ function setupEvents(){
     renderGoals();
     toast('목표가 저장되었습니다.', 'info');
   });
-  $('goalList').addEventListener('click',async(e)=>{ const acc=activeAcc(); if(!acc) return; const b=e.target.closest('.btn-delete-goal'); if(!b) return; const id=b.getAttribute('data-goal-id'); const card=b.closest('.goal-item'); if(card){ card.classList.add('removing'); await new Promise((r)=>setTimeout(r,180)); } acc.goals=acc.goals.filter((g)=>g.id!==id); await saveState(); renderGoals(); });
+  $('goalList').addEventListener('click',async(e)=>{
+    const acc=activeAcc(); if(!acc) return;
+    const sendBtn = e.target.closest('[data-goal-send]');
+    if (sendBtn) {
+      openGoalSendDialog(sendBtn.getAttribute('data-goal-send') || '');
+      return;
+    }
+    const b=e.target.closest('.btn-delete-goal'); if(!b) return;
+    const id=b.getAttribute('data-goal-id');
+    const card=b.closest('.goal-item');
+    if(card){ card.classList.add('removing'); await new Promise((r)=>setTimeout(r,180)); }
+    acc.goals=acc.goals.filter((g)=>g.id!==id);
+    await saveState();
+    renderGoals();
+  });
   $('settingShowUpdateGoalCards').addEventListener('change', async (e) => {
     state.settings.showUpdateGoalCards = !!e.target.checked;
     if (!state.settings.showUpdateGoalCards) clearRefluxGoalCards();
@@ -4045,7 +4253,7 @@ function setupEvents(){
     box.textContent = '';
     box.classList.add('hidden');
     loading.classList.remove('hidden');
-    let row = null;
+    let rows = [];
     try {
       if (category === 'id') {
         const normalized = normalizeInfinitasIdForSearch(keywordRaw);
@@ -4063,27 +4271,27 @@ function setupEvents(){
           box.textContent = `검색 실패: ${error.message}`;
           return;
         }
-        row = Array.isArray(data) ? data[0] : null;
+        rows = Array.isArray(data) ? data.slice(0, 1) : [];
       } else {
         const { data, error } = await client.rpc('get_public_profile_by_dj_name', { p_dj_name: keywordRaw });
         if (!error) {
-          row = Array.isArray(data) ? data[0] : null;
+          rows = Array.isArray(data) ? data : [];
         } else {
           const fallback = await client
             .from('users')
             .select('auth_user_id, infinitas_id, dj_name, google_email, icon_data_url')
             .ilike('dj_name', keywordRaw)
-            .limit(1);
+            .limit(20);
           if (fallback.error) {
             if (pop) pop.classList.remove('is-busy');
             box.classList.remove('hidden');
             box.textContent = `검색 실패: ${error.message}`;
             return;
           }
-          row = Array.isArray(fallback.data) ? fallback.data[0] : null;
+          rows = Array.isArray(fallback.data) ? fallback.data : [];
         }
       }
-      renderSocialSearchHit(row);
+      renderSocialSearchHit(rows);
       renderSocialPanel();
     } finally {
       if (pop) pop.classList.remove('is-busy');
@@ -4250,15 +4458,102 @@ function setupEvents(){
     await openSocialPeerRadarDialog(peer);
   });
   $('btnSocialPeerCompare')?.addEventListener('click', () => {
+    const peer = socialPeerMenuState;
     hideSocialPeerMenu();
-    toast('비교 기능은 다음 단계에서 연결됩니다.', 'info');
+    if (!peer) return;
+    openSocialCompareDialog(peer);
   });
-  $('btnSocialPeerSendGoals')?.addEventListener('click', () => {
-    hideSocialPeerMenu();
-    toast('목표 전송 바로가기 기능은 다음 단계에서 연결됩니다.', 'info');
+  $('goalSendList')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-goal-send-peer]');
+    if (!btn || btn.disabled) return;
+    const peerId = btn.getAttribute('data-goal-send-peer') || '';
+    const acc = activeAcc();
+    const goalId = goalSendContext?.goalId || '';
+    const goal = acc?.goals?.find((g) => String(g.id) === String(goalId));
+    if (!acc || !goal || !peerId) return;
+    btn.disabled = true;
+    try {
+      const peerRows = await fetchPeerTrackerRows(peerId);
+      if (goalAchievedFromTrackerRows(goal, peerRows)) {
+        toast('이 목표는 팔로우가 이미 클리어한 기록입니다!', 'warning');
+        btn.disabled = false;
+        return;
+      }
+      const client = getSupabaseClient();
+      if (!client) return;
+      const payloadGoal = { ...goal, source: acc.djName || '' };
+      const { data, error } = await client.rpc('send_goal_bundle_to_user', {
+        p_target_user_id: peerId,
+        p_goals: [payloadGoal],
+        p_sender_dj_name: acc.djName || '',
+        p_sender_infinitas_id: acc.infinitasId || ''
+      });
+      if (error) throw error;
+      const sent = Number(data || 0);
+      toast(`목표 ${sent}개 전송 요청을 보냈습니다.`, 'success');
+      $('goalSendDialog')?.close('done');
+      await refreshSocialOverview();
+    } catch (err) {
+      btn.disabled = false;
+      toast(`목표 전송 실패: ${err.message || err}`, 'error');
+    }
+  });
+  $('goalSendDialog')?.addEventListener('close', () => {
+    goalSendContext = null;
+  });
+  $('songPopup')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-song-goal]');
+    if (!btn) return;
+    const key = btn.getAttribute('data-song-goal') || '';
+    const chart = state.tableViews[state.activeTable]?.flatCharts?.find((c) => c.key === key);
+    if (!chart) return;
+    openSongGoalDialog(chart);
+  });
+  $('songGoalKind')?.addEventListener('change', syncSongGoalTargetVisibility);
+  $('songGoalCloseBtn')?.addEventListener('click', () => {
+    $('songGoalDialog')?.close('cancel');
+  });
+  $('songGoalForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const acc = activeAcc();
+    const chart = songGoalChart;
+    if (!acc || !chart) return;
+    const kind = $('songGoalKind')?.value || 'CLEAR';
+    const payload = {
+      id: crypto.randomUUID(),
+      table: chart.tableName,
+      title: chart.title,
+      chartType: chart.type,
+      kind,
+      source: acc.djName || ''
+    };
+    if (kind === 'SCORE') {
+      payload.targetScore = Math.max(0, num($('songGoalScore')?.value || 0));
+      if (!payload.targetScore) {
+        toast('목표 점수를 입력하세요.', 'warning');
+        return;
+      }
+    } else if (kind === 'RANK') {
+      payload.targetRank = $('songGoalRank')?.value || 'AA';
+    } else {
+      payload.targetLamp = $('songGoalLamp')?.value || 'HC';
+    }
+    const ex = acc.goals.find((g) => g.table === payload.table && titleKey(g.title) === titleKey(payload.title) && g.chartType === payload.chartType && g.kind === payload.kind);
+    if (ex) Object.assign(ex, payload);
+    else acc.goals.push(payload);
+    await saveState();
+    renderGoals();
+    $('songGoalDialog')?.close('done');
+    songGoalChart = null;
+    toast('목표가 저장되었습니다.', 'success');
+  });
+  $('songGoalDialog')?.addEventListener('close', () => {
+    songGoalChart = null;
   });
   $('socialPeerRadarDialog')?.addEventListener('close', hideRadarAxisPopup);
   $('socialPeerRadarDialog')?.addEventListener('cancel', hideRadarAxisPopup);
+  $('socialCompareDialog')?.addEventListener('close', hideRadarAxisPopup);
+  $('socialCompareDialog')?.addEventListener('cancel', hideRadarAxisPopup);
 
   $('btnGoogleLink').addEventListener('click', linkGoogleAccount);
   $('btnGoogleUnlink')?.addEventListener('click', unlinkGoogleAccount);
@@ -4280,6 +4575,7 @@ async function init(){
     throw new Error('electronAPI가 로드되지 않았습니다. preload 연결을 확인하세요.');
   }
   initEnhancedSelects();
+  renderHelpContent();
   bindRippleButtons();
   setupEvents();
   initSlidingControls();
@@ -4311,5 +4607,6 @@ async function init(){
 }
 
 init().catch((e)=>{ console.error(e); toast(`초기화 오류: ${e.message}`); });
+
 
 

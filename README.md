@@ -1,25 +1,39 @@
-﻿# INFINITAS Rank Table Maker
+﻿# INFINITAS Table Maker
 
-`tracker.tsv`를 업로드해 `SP11H`, `SP12H` Hard Gauge 서열표 기반으로 기록을 관리하는 Electron 데스크톱 앱입니다.
+INFINITAS 플레이 데이터(`tracker.tsv`)를 기반으로 SP10/11/12 HARD 서열표, 히스토리, 목표, 소셜 기능을 통합 관리하는 Electron 데스크톱 앱입니다.
 
-## 기능
-- `tracker.tsv` 불러오기
-- beatmania.app의 `SP11H`, `SP12H` 서열표 자동 반영
-- 카테고리별 램프/EX 점수/레이트 표시
-- 업데이트 히스토리(직전 대비 개선 차트 수 포함)
-- 목표 설정 및 달성 여부 표시
-- 현재 서열표 PNG 저장
+## 주요 기능
+- 서열표: SP10/11/12 HARD 전환, 일반/WIDE, 램프순/이름순 정렬, 이미지 다운로드
+- 히스토리: 램프/점수/목표/레이더 변경 이력, 히스토리 롤백
+- 목표: CLEAR/SCORE/RANK 목표 추가/갱신, 자동 달성 판정, 가져오기/내보내기
+- 소셜: Google 연동, 팔로우/팔로워, 피드, 팔로우 레이더/비교, 목표 전송
+- Reflux 연동: 플레이 후 갱신 완료로 tracker 반영
+
+## 기술 스택
+- Electron
+- Vanilla JS + HTML + CSS
+- Supabase (Auth/Postgres RPC)
 
 ## 실행
-1. 의존성 설치
 ```bash
 npm install
-```
-2. 실행
-```bash
 npm start
 ```
 
-## 참고
-- 서열표 데이터 출처: `https://beatmania.app/!/SP11H/`, `https://beatmania.app/!/SP12H/`
-- 히스토리/목표 데이터는 Electron `userData/state.json`에 저장됩니다.
+## 패키징
+```bash
+npm run build:single-exe
+```
+
+## 프로젝트 구조(핵심)
+- `main.js`: Electron main process
+- `preload.js`: renderer bridge
+- `src/index.html`: UI 엔트리/다이얼로그 마크업
+- `src/app.js`: renderer 로직
+- `src/styles.css`: 스타일
+- `src/helpContent.js`: 도움말 HTML 콘텐츠
+- `supabase/schema.sql`: DB 스키마/RPC
+
+## 데이터/권한 참고
+- 로컬 상태 저장: `%APPDATA%/infinitas-rank-table-maker`
+- Reflux 연동 특성상 관리자 권한이 필요할 수 있습니다.

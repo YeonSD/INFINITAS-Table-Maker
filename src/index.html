@@ -247,8 +247,14 @@
     <div id="socialPeerMenu" class="account-icon-menu hidden social-peer-menu">
       <button id="btnSocialPeerRadar" type="button" class="small-btn">레이더</button>
       <button id="btnSocialPeerCompare" type="button" class="small-btn">비교</button>
-      <button id="btnSocialPeerSendGoals" type="button" class="small-btn">목표 전송</button>
     </div>
+
+    <dialog id="socialCompareDialog" class="account-dialog help-dialog radar-dialog social-compare-dialog">
+      <form method="dialog">
+        <button id="socialCompareClose" type="submit" class="dialog-close-fab" aria-label="닫기">×</button>
+        <div id="socialCompareBody" class="help-body social-compare-body"></div>
+      </form>
+    </dialog>
 
     <dialog id="socialPeerRadarDialog" class="account-dialog help-dialog radar-dialog social-peer-radar-dialog">
       <form method="dialog">
@@ -301,6 +307,45 @@
         </div>
       </form>
     </dialog>
+    <dialog id="goalSendDialog" class="account-dialog">
+      <form method="dialog" id="goalSendForm">
+        <h3>목표 전송 대상 선택</h3>
+        <div id="goalSendList" class="social-follow-list"></div>
+        <div class="dialog-actions">
+          <button type="submit">닫기</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="songGoalDialog" class="account-dialog">
+      <form method="dialog" id="songGoalForm">
+        <h3>목표 설정</h3>
+        <div id="songGoalMeta" class="song-goal-meta"></div>
+        <div class="goal-form song-goal-form">
+          <select id="songGoalKind">
+            <option value="CLEAR">CLEAR</option>
+            <option value="SCORE">SCORE</option>
+            <option value="RANK">RANK</option>
+          </select>
+          <select id="songGoalLamp" class="song-goal-target">
+            <option value="EX">EX-HARD</option>
+            <option value="HC">HARD</option>
+            <option value="FC">FULL COMBO</option>
+          </select>
+          <input id="songGoalScore" class="song-goal-target hidden" type="number" min="0" step="1" placeholder="EX 점수 입력" />
+          <select id="songGoalRank" class="song-goal-target hidden">
+            <option value="A">A</option>
+            <option value="AA">AA</option>
+            <option value="AAA">AAA</option>
+            <option value="MAX-">MAX-</option>
+            <option value="MAX">MAX</option>
+          </select>
+          <button id="songGoalSaveBtn" type="submit" class="small-btn">목표 추가/갱신</button>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" id="songGoalCloseBtn">닫기</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="uiConfirmDialog" class="account-dialog">
       <form method="dialog" id="uiConfirmForm">
         <h3 id="uiConfirmTitle">확인</h3>
@@ -314,79 +359,7 @@
     <dialog id="helpDialog" class="account-dialog help-dialog">
       <form method="dialog" id="helpForm">
         <h3>INFINITAS Table Maker 도움말</h3>
-        <div class="help-body">
-          <h4>1) 이 앱이 하는 일</h4>
-          <p>
-            INFINITAS 플레이 기록(<code>tracker.tsv</code>)을 기반으로 SP10/11/12 HARD 서열표를 개인화하고,
-            히스토리/목표 관리까지 한 번에 하는 데스크톱 도구입니다.
-          </p>
-
-          <h4>2) 최초 사용 순서</h4>
-          <ol>
-            <li>앱 실행 후 계정 생성: DJ NAME, INFINITAS ID, 아이콘을 등록합니다.</li>
-            <li><code>데이터 불러오기(tsv)</code> 또는 <code>갱신</code>으로 데이터를 가져옵니다.</li>
-            <li>서열표에서 현재 상태를 확인하고, 목표 탭에서 목표를 등록합니다.</li>
-          </ol>
-
-          <h4>3) 갱신(Reflux 연동) 사용법</h4>
-          <ol>
-            <li><code>갱신</code> 버튼을 누르면 Reflux 최신 버전 확인/갱신 후 콘솔이 실행됩니다.</li>
-            <li>이 상태로 INFINITAS를 플레이합니다.</li>
-            <li>게임 종료 후 tracker.tsv 반영이 확인되면 <code>갱신 완료</code> 버튼이 활성화됩니다.</li>
-            <li><code>갱신 완료</code>를 눌러 팝업을 닫으면 데이터/히스토리가 업데이트됩니다.</li>
-          </ol>
-          <ul>
-            <li><code>갱신 취소</code>를 누르면 Reflux 프로세스와 콘솔이 종료됩니다.</li>
-            <li>갱신 중 목표 카드(설정 ON 시)는 진행중 목표만 표시합니다.</li>
-            <li>플레이 중 달성된 목표 카드는 카드 색상이 달성 상태로 바뀝니다.</li>
-          </ul>
-
-          <h4>4) 서열표 페이지</h4>
-          <ul>
-            <li><code>SP10 HARD / SP11 HARD / SP12 HARD</code> 테이블 전환</li>
-            <li><code>일반 / WIDE</code> 보기 전환</li>
-            <li><code>램프순 정렬 / 이름순 정렬</code></li>
-            <li><code>다운로드</code>: 현재 테이블을 이미지로 저장</li>
-            <li>곡 클릭: 램프, 스코어, MISS, RATE 등 상세 팝업</li>
-            <li>미해금 곡은 어둡게 표시되며 정렬 시 후순위로 처리됩니다.</li>
-          </ul>
-
-          <h4>5) 히스토리 페이지</h4>
-          <ul>
-            <li>왼쪽: 업로드/갱신 시점 목록, 오른쪽: 해당 시점 상세</li>
-            <li>카테고리: 램프 갱신 / 스코어 갱신 / 목표 갱신</li>
-            <li>최초 기록은 <code>(최초)</code>, 최신 기록은 <code>(최신)</code>으로 표시</li>
-            <li>롤백: 선택 시점 이후 히스토리 삭제 + 해당 시점 상태로 복원</li>
-          </ul>
-
-          <h4>6) 목표 페이지</h4>
-          <ul>
-            <li>목표 종류: <code>CLEAR / SCORE / RANK</code></li>
-            <li>곡 검색/채보 선택 후 <code>목표 추가/갱신</code></li>
-            <li>달성/진행 상태가 자동 갱신되며 카드 배경색으로 구분됩니다.</li>
-            <li><code>현재 목표 내보내기</code>, <code>목표 불러오기</code>, <code>달성 목표 전체 삭제</code>, <code>목표 전체 삭제</code> 지원</li>
-          </ul>
-
-          <h4>7) 계정/데이터 저장 위치</h4>
-          <p>
-            계정/히스토리/목표 데이터는 Windows 사용자 프로필의 앱 데이터 경로에 저장됩니다.
-            (예: <code>%APPDATA%/infinitas-rank-table-maker</code>)
-          </p>
-
-          <h4>8) 권한 관련 안내</h4>
-          <ul>
-            <li>이 앱은 메모리 접근이 필요한 Reflux 연동을 위해 관리자 권한이 필요합니다.</li>
-            <li>앱 실행 시 자동으로 관리자 권한 재실행을 시도하며, 거부하면 실행을 종료합니다.</li>
-          </ul>
-
-          <h4>9) 문제 해결</h4>
-          <ul>
-            <li>갱신 완료가 안 뜰 때: 게임 플레이 후 게임 종료까지 진행했는지 확인</li>
-            <li>데이터가 이상할 때: 히스토리 롤백으로 이전 시점 복구 후 다시 갱신</li>
-            <li>표시가 어긋날 때: 앱 재실행 후 <code>서열표 새로고침</code> 실행</li>
-            <li>Google 연동 전: INFINITAS ID를 정확히 입력하세요. 오입력 시 다른 계정과 충돌해 연동이 거부될 수 있습니다.</li>
-          </ul>
-        </div>
+        <div id="helpContentBody" class="help-body"></div>
         <div class="dialog-actions">
           <button id="helpCloseBtn" type="submit">닫기</button>
         </div>
@@ -515,7 +488,7 @@
             <div class="settings-panel-content" data-settings-panel="version">
               <div class="settings-version-card settings-version-card-maker">
                 <div><strong>INFINITAS Table Maker</strong></div>
-                <div>Version: 1.0.8</div>
+                <div>Version: 1.0.0</div>
               </div>
               <div class="settings-version-card settings-version-card-reflux">
                 <div><strong>Reflux</strong></div>

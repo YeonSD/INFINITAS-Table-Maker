@@ -499,6 +499,41 @@ $$;
 revoke all on function public.get_follow_tracker_rows(uuid) from public;
 grant execute on function public.get_follow_tracker_rows(uuid) to authenticated;
 
+create or replace function public.purge_my_social_data()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.goal_transfers
+  where sender_user_id = auth.uid()
+     or receiver_user_id = auth.uid();
+
+  delete from public.social_feed_events
+  where owner_user_id = auth.uid()
+     or actor_user_id = auth.uid();
+
+  delete from public.follow_requests
+  where requester_user_id = auth.uid()
+     or target_user_id = auth.uid();
+
+  delete from public.follows
+  where follower_user_id = auth.uid()
+     or following_user_id = auth.uid();
+
+  delete from public.goal_shares
+  where owner_user_id = auth.uid()
+     or target_user_id = auth.uid();
+
+  delete from public.account_states where auth_user_id = auth.uid();
+  delete from public.users where auth_user_id = auth.uid();
+end;
+$$;
+
+revoke all on function public.purge_my_social_data() from public;
+grant execute on function public.purge_my_social_data() to authenticated;
+
 create or replace function public.send_goal_bundle_to_user(
   p_target_user_id uuid,
   p_goals jsonb,

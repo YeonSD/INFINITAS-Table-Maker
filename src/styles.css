@@ -562,13 +562,14 @@ button.danger {
   border-radius: 50%;
   overflow: hidden;
   border: 3px solid #2e79cc;
-  background: #0d2438;
+  background: transparent;
 }
 
 .account-hero-icon {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -925,7 +926,8 @@ button.danger {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  object-fit: cover;
+  object-fit: contain;
+  background: transparent;
   border: 1px solid #6a6a6a;
 }
 
@@ -1428,6 +1430,18 @@ button.danger {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.goal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-send-goal {
+  border-color: #2f6fd1;
+  background: linear-gradient(180deg, #4a8de0 0%, #2f6fd1 100%);
+  color: #ffffff;
 }
 
 .goal-item .goal-meta {
@@ -2170,6 +2184,14 @@ button.danger {
   animation: socialSearchHitIn 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.social-search-hit-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .social-search-hit .social-follow-user {
   grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: 10px;
@@ -2812,6 +2834,156 @@ button.danger {
   z-index: 1710;
 }
 
+.social-compare-dialog {
+  width: min(1032px, calc(100vw - 36px)) !important;
+  max-width: 1032px !important;
+  padding: 0;
+  overflow: visible;
+}
+
+.social-compare-dialog form {
+  position: relative;
+  padding: 0;
+  overflow: visible;
+}
+
+.social-compare-body {
+  max-height: min(74vh, 680px);
+  width: 100%;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #1b2230 0%, #111722 100%);
+  border-radius: 10px;
+  border: 1px solid #2f4361;
+  color: #dbe9fb;
+  padding: 12px 12px 10px;
+  display: grid;
+  gap: 10px;
+  animation: socialCardIn 220ms ease both;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(187, 214, 247, 0.16),
+    inset 0 -1px 0 rgba(5, 9, 18, 0.48),
+    0 12px 26px rgba(8, 14, 27, 0.36);
+}
+
+.social-compare-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: #e0ecff;
+  font-size: 24px;
+  text-transform: uppercase;
+}
+
+.social-compare-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.social-compare-card {
+  border: 1px solid #3a4d69;
+  border-radius: 10px;
+  background: rgba(20, 30, 46, 0.64);
+  padding: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(185, 208, 240, 0.12);
+}
+
+.social-compare-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #9dc1ee;
+  margin-bottom: 8px;
+  letter-spacing: 0.03em;
+}
+
+.social-compare-radar-row {
+  display: grid;
+  grid-template-columns: 136px 108px 108px 108px;
+  gap: 10px;
+  font-size: 13px;
+  align-items: center;
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.social-compare-radar-row + .social-compare-radar-row {
+  margin-top: 4px;
+  border-top: 1px solid rgba(121, 150, 194, 0.24);
+  padding-top: 5px;
+}
+
+.social-compare-radar-row .axis-notes,
+.social-compare-radar-row .axis-peak,
+.social-compare-radar-row .axis-scratch,
+.social-compare-radar-row .axis-soflan,
+.social-compare-radar-row .axis-charge,
+.social-compare-radar-row .axis-chord {
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(17, 29, 46, 0.72);
+}
+
+.social-compare-radar-val {
+  color: #d6e7ff;
+}
+
+.social-compare-diff {
+  text-align: right;
+  font-weight: 800;
+}
+
+.social-compare-diff.plus {
+  color: #63b2ff;
+}
+
+.social-compare-diff.minus {
+  color: #ff6161;
+}
+
+.social-compare-diff.zero {
+  color: #c8d8f1;
+}
+
+.social-compare-level-head,
+.social-compare-level-row {
+  display: grid;
+  grid-template-columns: 100px 150px 150px;
+  gap: 10px;
+  align-items: center;
+  font-family: 'Orbitron', 'Rajdhani', sans-serif;
+  white-space: nowrap;
+}
+
+.social-compare-level-head {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #9dc1ee;
+  letter-spacing: 0.04em;
+}
+
+.social-compare-level-row {
+  border-top: 1px solid rgba(121, 150, 194, 0.24);
+  padding-top: 6px;
+  font-size: 12px;
+}
+
+.social-compare-level-key {
+  color: #d7e6fb;
+  font-weight: 800;
+}
+
+.social-compare-level-value {
+  color: #e6f0ff;
+}
+
 .social-peer-radar-dialog {
   width: min(460px, 92vw);
   padding: 0;
@@ -3187,9 +3359,52 @@ button.danger {
 }
 
 .song-popup-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-size: 16px;
   font-weight: 700;
   margin-bottom: 6px;
+}
+
+.song-goal-open-btn {
+  border: 1px solid #6a778a;
+  border-radius: 999px;
+  background: rgba(229, 234, 242, 0.84);
+  color: #2d3d52;
+  font-size: 11px;
+  padding: 4px 10px;
+  min-height: 0;
+}
+
+.song-goal-meta {
+  font-size: 12px;
+  color: #44566f;
+  margin-bottom: 8px;
+}
+
+.song-goal-form {
+  grid-template-columns: 120px 160px 130px;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+#songGoalSaveBtn {
+  width: 100%;
+  white-space: nowrap;
+}
+
+#songGoalDialog {
+  width: min(460px, 92vw);
+}
+
+#songGoalDialog form {
+  overflow-x: hidden;
+}
+
+#songGoalDialog .dialog-actions {
+  justify-content: flex-end;
 }
 
 .song-popup-meta {

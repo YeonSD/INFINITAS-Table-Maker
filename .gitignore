@@ -4,3 +4,6 @@ dist-portable/
 .tmp_reflux/
 Reflux.1.16.2/
 *.log
+tmp_*.html
+*.tmp
+.DS_Store
