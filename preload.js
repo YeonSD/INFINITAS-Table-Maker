@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onRefluxStatus: (listener) => on('reflux:status', listener),
   onRefluxTracker: (listener) => on('reflux:tracker', listener),
   onRefluxReady: (listener) => on('reflux:ready', listener),
+  onRankRefreshProgress: (listener) => on('ranktables:progress', listener),
   getRankTables: () => ipcRenderer.invoke('ranktables:get'),
   refreshRankTables: () => ipcRenderer.invoke('ranktables:refresh'),
   readState: () => ipcRenderer.invoke('state:read'),

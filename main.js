@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { exec } = require('child_process');
+const { PDFParse } = require('pdf-parse');
 
 const RANK_TABLE_URLS = {
   SP10H: 'https://beatmania.app/!/SP10H/',
@@ -20,6 +21,8 @@ const ATWIKI_TABLE_URLS = {
   SP12H: 'https://w.atwiki.jp/bemani2sp11/pages/18.html'
 };
 const RADAR_AXES = ['NOTES', 'PEAK', 'SCRATCH', 'SOFLAN', 'CHARGE', 'CHORD'];
+const NOTES_RADAR_DRIVE_FOLDER_ID = '1vsHfrRj__nFks3UlZlLqIjHNSkY8E5ep';
+const NOTES_RADAR_TIME_SKEW_MS = 10 * 60 * 1000;
 
 function getStatePath() {
   return path.join(app.getPath('userData'), 'state.json');
@@ -35,6 +38,14 @@ function getBundledRankCachePath() {
 
 function getBundledNotesRadarPath() {
   return path.join(app.getAppPath(), 'assets', 'notes-radar-sp.json');
+}
+
+function getUserNotesRadarPath() {
+  return path.join(app.getPath('userData'), 'notes-radar-sp.json');
+}
+
+function getUserNotesRadarMetaPath() {
+  return path.join(app.getPath('userData'), 'notes-radar-sp.meta.json');
 }
 
 function readState() {
@@ -416,15 +427,17 @@ function extractTabledata(html) {
 }
 
 function readNotesRadarData() {
-  const p = getBundledNotesRadarPath();
-  if (!fs.existsSync(p)) return null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-    if (!raw || !Array.isArray(raw.charts)) return null;
-    return raw;
-  } catch {
-    return null;
+  for (const p of [getUserNotesRadarPath(), getBundledNotesRadarPath()]) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (!raw || !Array.isArray(raw.charts)) continue;
+      return raw;
+    } catch {
+      // ignore broken cache
+    }
   }
+  return null;
 }
 
 function buildNotesRadarIndex(data) {
@@ -491,6 +504,223 @@ function applyNotesRadarToTables(tables, radarData) {
     });
   });
   return tables;
+}
+
+function readJsonSafe(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRadarTitle(s) {
+  return String(s || '')
+    .normalize('NFKC')
+    .replace(/[’`]/gu, "'")
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function detectAxisFromName(fileName) {
+  const upper = String(fileName || '').toUpperCase();
+  return RADAR_AXES.find((axis) => upper.includes(axis)) || '';
+}
+
+function parseRadarRowsFromText(text) {
+  const rows = [];
+  String(text || '')
+    .split(/\r?\n/g)
+    .forEach((line) => {
+      if (!line || !line.includes('\t')) return;
+      const cols = line
+        .split('\t')
+        .map((x) => x.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      if (cols.length < 5) return;
+      if (cols[1] !== 'SP') return;
+      const type = (cols[2] || '').toUpperCase();
+      if (!/^[HAL]$/.test(type)) return;
+      const notes = Number(String(cols[3] || '').replace(/[^\d]/g, '')) || 0;
+      const score = Number(String(cols[4] || '').replace(/[^\d.]/g, '')) || 0;
+      const title = normalizeRadarTitle(cols[0]);
+      if (!title || notes <= 0 || score <= 0) return;
+      rows.push({ title, type, notes, score });
+    });
+  return rows;
+}
+
+function radarKeyOf(title, type) {
+  return `${normalizeRadarTitle(title)}|${String(type || 'A').toUpperCase()}`;
+}
+
+function dominantAxis(radar) {
+  let best = '';
+  let bestValue = -1;
+  RADAR_AXES.forEach((axis) => {
+    const v = Number(radar?.[axis] || 0);
+    if (v > bestValue) {
+      bestValue = v;
+      best = axis;
+    }
+  });
+  return best;
+}
+
+async function parseRadarPdf(filePath, axis) {
+  const parser = new PDFParse({ data: fs.readFileSync(filePath) });
+  try {
+    const result = await parser.getText();
+    const rows = parseRadarRowsFromText(result?.text || '');
+    return rows.map((r) => ({ ...r, axis }));
+  } finally {
+    await parser.destroy();
+  }
+}
+
+async function buildNotesRadarJsonFromPdfDir(sourceDir) {
+  const pdfFiles = fs
+    .readdirSync(sourceDir)
+    .filter((name) => /\.pdf$/i.test(name))
+    .map((name) => ({ name, axis: detectAxisFromName(name) }))
+    .filter((x) => !!x.axis);
+  if (!pdfFiles.length) throw new Error(`No radar pdf files found in ${sourceDir}`);
+  const merged = new Map();
+  for (const file of pdfFiles) {
+    const full = path.join(sourceDir, file.name);
+    const rows = await parseRadarPdf(full, file.axis);
+    rows.forEach((row) => {
+      const key = radarKeyOf(row.title, row.type);
+      const prev = merged.get(key) || {
+        title: row.title,
+        type: row.type,
+        notes: row.notes,
+        radar: { NOTES: 0, PEAK: 0, SCRATCH: 0, SOFLAN: 0, CHARGE: 0, CHORD: 0 }
+      };
+      prev.notes = prev.notes || row.notes;
+      prev.radar[row.axis] = row.score;
+      merged.set(key, prev);
+    });
+  }
+  const charts = [...merged.values()]
+    .map((x) => ({ ...x, radarTop: dominantAxis(x.radar) }))
+    .sort((a, b) => {
+      const t = a.title.localeCompare(b.title);
+      if (t !== 0) return t;
+      return a.type.localeCompare(b.type);
+    });
+  return {
+    generatedAt: new Date().toISOString(),
+    sourceDir,
+    count: charts.length,
+    charts
+  };
+}
+
+function extractDriveFileIdsFromFolderHtml(html) {
+  const ids = new Set();
+  const re = /\/file\/d\/([a-zA-Z0-9_-]{20,})\/view/g;
+  let m;
+  while ((m = re.exec(String(html || '')))) ids.add(m[1]);
+  return [...ids];
+}
+
+function parseMetaContent(html, itemProp) {
+  const re = new RegExp(`<meta\\s+itemprop=["']${itemProp}["']\\s+content=["']([^"']+)["']`, 'i');
+  const m = String(html || '').match(re);
+  return m ? decodeHtmlEntities(m[1]).trim() : '';
+}
+
+function parseDateMsFlexible(v) {
+  const s = String(v || '').trim();
+  if (!s) return 0;
+  const ms = Date.parse(s);
+  if (Number.isFinite(ms)) return ms;
+  const ms2 = Date.parse(s.replace(/\./g, '-'));
+  return Number.isFinite(ms2) ? ms2 : 0;
+}
+
+async function fetchDriveRadarFileMetas() {
+  const folderUrl = `https://drive.google.com/embeddedfolderview?id=${NOTES_RADAR_DRIVE_FOLDER_ID}#list`;
+  const folderHtml = await fetchHtml(folderUrl);
+  const ids = extractDriveFileIdsFromFolderHtml(folderHtml);
+  const metas = [];
+  for (const id of ids) {
+    const fileHtml = await fetchHtml(`https://drive.google.com/file/d/${id}/view`);
+    const name = parseMetaContent(fileHtml, 'name');
+    const axis = detectAxisFromName(name);
+    if (!axis || !/\.pdf$/i.test(name)) continue;
+    const upperName = String(name || '').toUpperCase();
+    if (!upperName.includes('SP_') || upperName.includes('DP_')) continue;
+    const modifiedRaw = parseMetaContent(fileHtml, 'dateModified');
+    const modifiedMs = parseDateMsFlexible(modifiedRaw);
+    metas.push({
+      id,
+      name,
+      axis,
+      modifiedRaw,
+      modifiedMs,
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${id}`
+    });
+  }
+  const byAxis = new Map();
+  metas.forEach((m) => {
+    const prev = byAxis.get(m.axis);
+    if (!prev || (m.modifiedMs || 0) > (prev.modifiedMs || 0)) byAxis.set(m.axis, m);
+  });
+  return [...byAxis.values()];
+}
+
+function shouldUpdateNotesRadar(remoteFiles, localMeta) {
+  if (!Array.isArray(remoteFiles) || remoteFiles.length === 0) return false;
+  if (!localMeta?.files) return true;
+  return remoteFiles.some((f) => {
+    const prev = localMeta.files[f.id];
+    const prevMs = Number(prev?.modifiedMs || 0);
+    const nextMs = Number(f.modifiedMs || 0);
+    if (!nextMs) return false;
+    return nextMs > prevMs + NOTES_RADAR_TIME_SKEW_MS;
+  });
+}
+
+async function maybeUpdateNotesRadarFromDrive(progress) {
+  const log = (msg) => {
+    try { progress?.(msg); } catch { /* ignore */ }
+  };
+  log('1/2 노트 레이더: Google Drive PDF 최신 여부를 확인합니다. (출처: notesradarbot Google Drive)');
+  const remoteFiles = await fetchDriveRadarFileMetas();
+  if (!remoteFiles.length) {
+    log('노트 레이더: Drive에서 SP PDF를 찾지 못해 기존 데이터를 유지합니다.');
+    return { updated: false, reason: 'no_remote_files' };
+  }
+  const localMeta = readJsonSafe(getUserNotesRadarMetaPath());
+  if (!shouldUpdateNotesRadar(remoteFiles, localMeta)) {
+    log('노트 레이더: 기존 로컬 데이터가 최신입니다. (UTC/KST 시간 오차 허용 비교 적용)');
+    return { updated: false, reason: 'up_to_date', files: remoteFiles };
+  }
+
+  const tempDir = path.join(app.getPath('userData'), 'notes-radar-download');
+  if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+  ensureDir(tempDir);
+  for (const f of remoteFiles) {
+    log(`노트 레이더 다운로드: ${f.name}`);
+    await downloadToFile(f.downloadUrl, path.join(tempDir, f.name));
+  }
+  const payload = await buildNotesRadarJsonFromPdfDir(tempDir);
+  const outPath = getUserNotesRadarPath();
+  ensureDir(path.dirname(outPath));
+  fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
+  const metaOut = {
+    folderId: NOTES_RADAR_DRIVE_FOLDER_ID,
+    checkedAt: new Date().toISOString(),
+    files: Object.fromEntries(
+      remoteFiles.map((f) => [f.id, { name: f.name, axis: f.axis, modifiedRaw: f.modifiedRaw, modifiedMs: f.modifiedMs }])
+    )
+  };
+  fs.writeFileSync(getUserNotesRadarMetaPath(), JSON.stringify(metaOut, null, 2), 'utf8');
+  log(`노트 레이더 업데이트 완료: ${payload.count} charts`);
+  return { updated: true, count: payload.count, files: remoteFiles };
 }
 
 async function fetchRankTables() {
@@ -1007,8 +1237,17 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('ranktables:refresh', async () => {
+    const progress = (message) => sendToRenderer('ranktables:progress', { message: String(message || '') });
+    progress('1/2 노트 레이더 갱신을 시작합니다.');
+    try {
+      await maybeUpdateNotesRadarFromDrive(progress);
+    } catch (e) {
+      progress(`노트 레이더 갱신 중 경고: ${e.message || e} (기존 데이터로 진행)`);
+    }
+    progress('2/2 서열표 소스(beatmania.app / atwiki / 나무위키) 갱신을 시작합니다.');
     const tables = await fetchRankTables();
     writeUserRankCache(tables);
+    progress('서열표 데이터 갱신 완료');
     return tables;
   });
 

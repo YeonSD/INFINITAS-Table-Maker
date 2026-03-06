@@ -3804,12 +3804,30 @@ async function extractCurrentTsv() {
 }
 
 async function loadTablesFromCache(){ state.rankTables=await window.electronAPI.getRankTables(); refreshAll(); }
+function appendRefreshStatus(line) {
+  const host = $('refreshStatusLog');
+  if (!host) return;
+  const text = String(line || '').trim();
+  if (!text) return;
+  if (host.children.length === 1 && /대기 중/.test(host.textContent || '')) host.innerHTML = '';
+  const row = document.createElement('div');
+  row.textContent = text;
+  host.appendChild(row);
+  host.scrollTop = host.scrollHeight;
+}
+
 async function refreshTables(){
   const dialog = $('refreshDialog');
+  const subtitle = $('refreshSubtitle');
+  const logHost = $('refreshStatusLog');
+  if (subtitle) subtitle.textContent = '노트 레이더와 서열표 기준을 순차적으로 갱신합니다. 잠시만 기다려주세요.';
+  if (logHost) logHost.innerHTML = '<div>대기 중...</div>';
   if (!dialog.open) dialog.showModal();
   try {
+    appendRefreshStatus('갱신 시작...');
     state.rankTables = await window.electronAPI.refreshRankTables();
     refreshAll();
+    appendRefreshStatus('로컬 반영 완료');
     toast('서열표를 최신 데이터로 갱신했습니다.', 'success');
     showMissingMetaDialog();
   } finally {
@@ -3820,6 +3838,9 @@ async function refreshTables(){
 function setupEvents(){
   refluxUnsubs.forEach((off) => { try { off(); } catch { /* ignore */ } });
   refluxUnsubs = [
+    window.electronAPI.onRankRefreshProgress(({ message }) => {
+      appendRefreshStatus(message || '');
+    }),
     window.electronAPI.onRefluxStatus((s) => {
       if (s?.gameDetected) {
         appendRefluxStatus('게임 실행을 확인했습니다. 메모리에서 곡 데이터를 조사합니다.');

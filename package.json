@@ -1,6 +1,6 @@
 {
   "name": "infinitas-rank-table-maker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Desktop app for IIDX INFINITAS rank table tracking",
   "main": "main.js",
   "scripts": {
@@ -10,13 +10,13 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
-    "html2canvas": "^1.4.1"
+    "html2canvas": "^1.4.1",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "electron": "^37.2.4",
     "electron-builder": "^24.13.3",
     "electron-packager": "^17.1.2",
-    "pdf-parse": "^2.4.5",
     "png-to-ico": "^3.0.1"
   },
   "build": {
@@ -37,7 +37,11 @@
       "src/**/*",
       "assets/**/*",
       "package.json",
-      "node_modules/**/*"
+      "!assets/NotesRader/**",
+      "!docs/**",
+      "!scripts/**",
+      "!tmp_*.html",
+      "!**/*.md"
     ],
     "win": {
       "icon": "build/icon.ico",

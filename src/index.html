@@ -488,7 +488,7 @@
             <div class="settings-panel-content" data-settings-panel="version">
               <div class="settings-version-card settings-version-card-maker">
                 <div><strong>INFINITAS Table Maker</strong></div>
-                <div>Version: 1.0.1</div>
+                <div>Version: 1.0.2</div>
               </div>
               <div class="settings-version-card settings-version-card-reflux">
                 <div><strong>Reflux</strong></div>
@@ -515,7 +515,14 @@
     <dialog id="refreshDialog" class="account-dialog refresh-dialog">
       <form method="dialog" id="refreshForm">
         <h3>서열표 데이터 갱신</h3>
-        <div class="refresh-subtitle">최신 기준표를 불러오는 중입니다. 잠시만 기다려주세요.</div>
+        <div id="refreshSubtitle" class="refresh-subtitle">노트 레이더와 서열표 기준을 순차적으로 갱신합니다. 잠시만 기다려주세요.</div>
+        <div class="refresh-card">
+          <div><strong>STEP 1</strong> : 노트 레이더 PDF 확인/업데이트 (출처: Google Drive)</div>
+          <div><strong>STEP 2</strong> : 서열표 원본 갱신 (beatmania.app / atwiki / 나무위키)</div>
+        </div>
+        <div id="refreshStatusLog" class="refresh-status-log">
+          <div>대기 중...</div>
+        </div>
         <div class="refresh-card">
           <div><strong>SP10</strong> : beatmania.app 기준</div>
           <div><strong>SP11</strong> : atwiki(페이지 21) → 보완: beatmania.app / 나무위키</div>
