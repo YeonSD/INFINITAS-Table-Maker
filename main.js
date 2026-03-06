@@ -432,6 +432,7 @@ function readNotesRadarData() {
     try {
       const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!raw || !Array.isArray(raw.charts)) continue;
+      if (!raw.charts.length) continue;
       return raw;
     } catch {
       // ignore broken cache
@@ -708,6 +709,10 @@ async function maybeUpdateNotesRadarFromDrive(progress) {
     await downloadToFile(f.downloadUrl, path.join(tempDir, f.name));
   }
   const payload = await buildNotesRadarJsonFromPdfDir(tempDir);
+  if (!payload || !Array.isArray(payload.charts) || Number(payload.count || 0) <= 0) {
+    log('노트 레이더: PDF 파싱 결과가 0건이라 기존 데이터를 유지합니다.');
+    return { updated: false, reason: 'empty_payload', files: remoteFiles };
+  }
   const outPath = getUserNotesRadarPath();
   ensureDir(path.dirname(outPath));
   fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
@@ -1123,6 +1128,8 @@ app.whenReady().then(() => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.infinitastablemaker.app');
   }
+
+  ipcMain.handle('app:getVersion', async () => app.getVersion());
 
   ipcMain.handle('dialog:openTracker', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {

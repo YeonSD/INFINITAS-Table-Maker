@@ -31,7 +31,6 @@ const ICON_MAX_HEIGHT = 512;
 const BANNER_MAX_BYTES = 4 * 1024 * 1024;
 const BANNER_MAX_WIDTH = 1920;
 const BANNER_MAX_HEIGHT = 1080;
-const APP_VERSION = '1.0.3';
 const APP_RELEASES_LATEST_API = 'https://api.github.com/repos/seungdonyeon/INFINITAS-Table-Maker/releases/latest';
 const DEFAULT_SOCIAL_SETTINGS = Object.freeze({
   discoverability: 'searchable',
@@ -969,7 +968,14 @@ async function initAppVersionStatus() {
   const badge = $('appVersionBadge');
   const makerVersionText = $('makerVersionText');
   if (!badge || !makerVersionText) return;
-  const currentVersion = APP_VERSION;
+  let currentVersion = '0.0.0';
+  try {
+    if (window.electronAPI?.getAppVersion) {
+      currentVersion = String(await window.electronAPI.getAppVersion() || '0.0.0');
+    }
+  } catch {
+    currentVersion = '0.0.0';
+  }
   makerVersionText.textContent = currentVersion;
   setAppVersionBadge('checking', { currentVersion });
 

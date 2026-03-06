@@ -7,6 +7,7 @@ function on(channel, listener) {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   openTrackerDialog: () => ipcRenderer.invoke('dialog:openTracker'),
   readTrackerFile: (filePath) => ipcRenderer.invoke('tracker:read', filePath),
   writeAdjacentTracker: (payload) => ipcRenderer.invoke('tracker:writeAdjacent', payload),
