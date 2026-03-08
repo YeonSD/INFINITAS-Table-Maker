@@ -1,6 +1,6 @@
 {
   "name": "infinitas-rank-table-maker",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Desktop app for IIDX INFINITAS rank table tracking",
   "main": "main.js",
   "scripts": {
@@ -27,6 +27,13 @@
       {
         "from": "Reflux.1.16.2",
         "to": "Reflux",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "radar-hud",
+        "to": "radar-hud",
         "filter": [
           "**/*"
         ]

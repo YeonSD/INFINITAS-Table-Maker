@@ -68,6 +68,7 @@ const state = {
   settings: {
     showUpdateGoalCards: true,
     enableHistoryRollback: true,
+    noteRadarHudEnabled: false,
     discoverability: DEFAULT_SOCIAL_SETTINGS.discoverability,
     discoverByDjName: DEFAULT_SOCIAL_SETTINGS.discoverByDjName,
     followPolicy: DEFAULT_SOCIAL_SETTINGS.followPolicy,
@@ -1126,6 +1127,7 @@ function normalizeSettings(s) {
   return {
     showUpdateGoalCards: src.showUpdateGoalCards !== false,
     enableHistoryRollback: src.enableHistoryRollback !== false,
+    noteRadarHudEnabled: src.noteRadarHudEnabled === true,
     discoverability: src.discoverability === 'hidden' ? 'hidden' : 'searchable',
     discoverByDjName: src.discoverByDjName !== false,
     followPolicy: ['auto', 'manual', 'disabled'].includes(src.followPolicy) ? src.followPolicy : 'manual',
@@ -1893,6 +1895,8 @@ function renderSettings() {
   const discoverability = $('settingDiscoverability');
   if (show) show.checked = !!state.settings.showUpdateGoalCards;
   if (rb) rb.checked = !!state.settings.enableHistoryRollback;
+  const hud = $('settingNoteRadarHudEnabled');
+  if (hud) hud.checked = !!state.settings.noteRadarHudEnabled;
   if (discoverability) discoverability.checked = state.settings.discoverability !== 'hidden';
   $('settingDiscoverabilityDjName').checked = state.settings.discoverByDjName !== false;
   $('settingFollowPolicyManual').checked = state.settings.followPolicy === 'manual';
@@ -3341,6 +3345,24 @@ function songSocialSectionHtml(kind, rows, chart) {
   return `<div><strong>${title}</strong>${list}</div>`;
 }
 
+function normalizeSongSocialRows(rows) {
+  const followingPeerSet = new Set(
+    (socialOverviewRows || [])
+      .filter((r) => r?.relation_type === 'follow' && (r.direction || 'following') === 'following')
+      .map((r) => String(r.peer_user_id || ''))
+      .filter(Boolean)
+  );
+  const out = [];
+  const seen = new Set();
+  (rows || []).forEach((row) => {
+    const pid = String(row?.peer_user_id || '');
+    if (!pid || !followingPeerSet.has(pid) || seen.has(pid)) return;
+    seen.add(pid);
+    out.push(row);
+  });
+  return out;
+}
+
 async function showSongPopup(chart,e){
   const p=$('songPopup');
   const acc = activeAcc();
@@ -3363,7 +3385,7 @@ async function showSongPopup(chart,e){
   const baseHtml = `${radarHtml}<hr />${infoHtml}<hr />${playHtml}`;
   let socialHtml = '';
   try {
-    const rows = await fetchSongSocialContext(chart);
+    const rows = normalizeSongSocialRows(await fetchSongSocialContext(chart));
     if (rows.length) {
       socialHtml = `<hr />${songSocialSectionHtml('follow', rows, chart)}`;
     }
@@ -3972,7 +3994,10 @@ async function startRefluxUpdate() {
   }
   appendRefluxStatus('갱신을 시작합니다. 이 프로그램을 실행한 채로 IIDX INFINITAS를 플레이해주세요.');
   if (!dialog.open) dialog.showModal();
-  await window.electronAPI.startReflux({ exePath: ensured.exePath || state.refluxExePath || '' });
+  await window.electronAPI.startReflux({
+    exePath: ensured.exePath || state.refluxExePath || '',
+    noteRadarHudEnabled: !!state.settings.noteRadarHudEnabled
+  });
 }
 
 async function extractCurrentTsv() {
@@ -4386,6 +4411,10 @@ function setupEvents(){
     state.settings.enableHistoryRollback = !!e.target.checked;
     await saveState();
     renderHistory();
+  });
+  $('settingNoteRadarHudEnabled').addEventListener('change', async (e) => {
+    state.settings.noteRadarHudEnabled = !!e.target.checked;
+    await saveState();
   });
   const applySocialSettings = async () => {
     state.settings.discoverability = $('settingDiscoverability')?.checked ? 'searchable' : 'hidden';

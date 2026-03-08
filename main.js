@@ -808,6 +808,8 @@ let refluxWarnedNoTracker = false;
 let refluxGameWasRunning = false;
 let refluxTrackerUpdatedAfterGame = false;
 let refluxReadySent = false;
+let refluxHudAutoInjectEnabled = false;
+let refluxHudInjectedPid = 0;
 
 
 function sendToRenderer(channel, payload) {
@@ -851,7 +853,54 @@ function parseTasklistHasBm2dx(stdout) {
   return s.includes('bm2dx.exe');
 }
 
-function startRefluxMonitor(exePath) {
+function getRadarHudToolPaths() {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'radar-hud'),
+    path.join(app.getAppPath(), 'radar-hud'),
+    path.join(__dirname, 'radar-hud'),
+    path.join('D:\\client\\build\\bin\\x64\\Release')
+  ];
+  for (const dir of candidates) {
+    const injector = path.join(dir, 'iidx_chart_tap_injector.exe');
+    const dll = path.join(dir, 'iidx_overlay_radar_only.dll');
+    if (fs.existsSync(injector) && fs.existsSync(dll)) {
+      return { injector, dll };
+    }
+  }
+  return null;
+}
+
+async function getBm2dxPid() {
+  try {
+    const cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Process bm2dx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id)"';
+    const out = await execAsync(cmd);
+    const m = String(out.stdout || '').match(/(\d+)/);
+    return m ? Number(m[1]) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function tryInjectRadarHud() {
+  if (!refluxHudAutoInjectEnabled || refluxHudInjectedPid) return;
+  const pid = await getBm2dxPid();
+  if (!pid) return;
+  const tools = getRadarHudToolPaths();
+  if (!tools) {
+    sendToRenderer('reflux:log', '노트 레이더 HUD 파일을 찾지 못했습니다. (injector/dll)');
+    return;
+  }
+  try {
+    const cmd = `"${tools.injector}" --pid ${pid} --dll "${tools.dll}"`;
+    await execAsync(cmd);
+    refluxHudInjectedPid = pid;
+    sendToRenderer('reflux:log', `노트 레이더 HUD 주입 완료 (PID ${pid})`);
+  } catch (e) {
+    sendToRenderer('reflux:log', `노트 레이더 HUD 주입 실패: ${e.message}`);
+  }
+}
+
+function startRefluxMonitor(exePath, options = {}) {
   const trackerPath = path.join(path.dirname(exePath), 'tracker.tsv');
   refluxLastTrackerMtime = 0;
   refluxGameDetected = false;
@@ -859,6 +908,8 @@ function startRefluxMonitor(exePath) {
   refluxGameWasRunning = false;
   refluxTrackerUpdatedAfterGame = false;
   refluxReadySent = false;
+  refluxHudAutoInjectEnabled = options.noteRadarHudEnabled === true;
+  refluxHudInjectedPid = 0;
   const startedAt = Date.now();
   refluxMonitorTimer = setInterval(() => {
     exec('tasklist /FI "IMAGENAME eq bm2dx.exe"', (err, stdout) => {
@@ -867,11 +918,13 @@ function startRefluxMonitor(exePath) {
         if (found && !refluxGameDetected) {
           refluxGameDetected = true;
           sendToRenderer('reflux:status', { running: true, gameDetected: true });
+          tryInjectRadarHud();
         }
         if (found) {
           refluxGameWasRunning = true;
         } else if (refluxGameWasRunning && !refluxReadySent) {
           refluxGameWasRunning = false;
+          refluxHudInjectedPid = 0;
           if (refluxTrackerUpdatedAfterGame && refluxLastTrackerMtime > 0) {
             try {
               const content = fs.existsSync(trackerPath) ? fs.readFileSync(trackerPath, 'utf8') : '';
@@ -1189,7 +1242,9 @@ app.whenReady().then(() => {
     return { saved: true, filePath: result.filePath };
   });
 
-  ipcMain.handle('reflux:start', async (_event, { exePath }) => {
+  ipcMain.handle('reflux:start', async (_event, payload = {}) => {
+    const exePath = payload?.exePath;
+    const hudEnabledFromPayload = payload?.noteRadarHudEnabled === true;
     let pathToRun = exePath;
     if (!pathToRun || !fs.existsSync(pathToRun)) {
       const ensured = await checkAndUpdateReflux();
@@ -1221,7 +1276,9 @@ app.whenReady().then(() => {
     refluxProcess = startedPid ? { pid: startedPid } : null;
     sendToRenderer('reflux:status', { running: true, gameDetected: false });
     sendToRenderer('reflux:log', 'Reflux 콘솔 창을 실행했습니다. 콘솔에서 진행 로그를 확인하세요.');
-    startRefluxMonitor(pathToRun);
+    startRefluxMonitor(pathToRun, {
+      noteRadarHudEnabled: hudEnabledFromPayload || readState()?.settings?.noteRadarHudEnabled === true
+    });
     return { started: true, alreadyRunning: false, exePath: pathToRun, pid: startedPid };
   });
 
