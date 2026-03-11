@@ -138,7 +138,12 @@ function normTitle(t) {
 }
 
 function looseTitle(t) {
-  return normTitle(t).replace(/[χΧ]/gu, 'x').replace(/[øØ∅]/gu, 'o').replace(/[^\p{L}\p{N}]/gu, '');
+  return normTitle(t)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[χΧ]/gu, 'x')
+    .replace(/[øØ∅]/gu, '0')
+    .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 function foldedAsciiTitle(t) {
@@ -466,6 +471,52 @@ function parseCsvLine(line) {
   }
   out.push(cur);
   return out;
+}
+
+function mergeRankItemDataMissing(targetData, sourceData) {
+  if (!targetData || !sourceData) return;
+  Object.keys(sourceData).forEach((k) => {
+    if (k === 'title' || k === 'type') return;
+    const prev = targetData[k];
+    const next = sourceData[k];
+    if (next == null || next === '') return;
+    if (prev == null || prev === '' || prev === 0) {
+      targetData[k] = next;
+    }
+  });
+}
+
+function dedupeRankTable(table) {
+  if (!table?.categories) return table;
+  (table.categories || []).forEach((cat) => {
+    const seen = new Map();
+    const nextItems = [];
+    (cat.items || []).forEach((item) => {
+      const data = item?.data || {};
+      const title = String(data.title || '').trim();
+      const type = String(data.type || 'A').trim().toUpperCase();
+      if (!title) {
+        nextItems.push(item);
+        return;
+      }
+      const key = `${looseTitle(title)}|${type}`;
+      const existing = seen.get(key);
+      if (!existing?.data) {
+        seen.set(key, item);
+        nextItems.push(item);
+        return;
+      }
+      mergeRankItemDataMissing(existing.data, data);
+    });
+    cat.items = nextItems;
+  });
+  return table;
+}
+
+function dedupeRankTablesPayload(tables) {
+  if (!tables || typeof tables !== 'object') return tables;
+  Object.values(tables).forEach((table) => dedupeRankTable(table));
+  return tables;
 }
 
 function formatCsvLine(cols) {
@@ -1154,7 +1205,7 @@ async function fetchRankTables() {
     const fallbackHtml = await fetchHtml(RANK_TABLE_URLS.SP12H);
     out.SP12H = extractTabledata(fallbackHtml);
   }
-  return applyNotesRadarToTables(out, readNotesRadarData());
+  return dedupeRankTablesPayload(applyNotesRadarToTables(out, readNotesRadarData()));
 }
 
 function readRankCacheFile(filePath) {
@@ -1172,15 +1223,22 @@ function readRankCacheFile(filePath) {
 
 function getCachedRankTables() {
   const userCache = readRankCacheFile(getUserRankCachePath());
-  if (userCache?.version === 3 && userCache?.tables) return userCache;
+  if (userCache?.version === 3 && userCache?.tables) {
+    dedupeRankTablesPayload(userCache.tables);
+    return userCache;
+  }
   const bundled = readRankCacheFile(getBundledRankCachePath());
-  if (bundled?.tables) return bundled;
+  if (bundled?.tables) {
+    dedupeRankTablesPayload(bundled.tables);
+    return bundled;
+  }
   return null;
 }
 
 function writeUserRankCache(tables) {
   const outPath = getUserRankCachePath();
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  dedupeRankTablesPayload(tables);
   fs.writeFileSync(
     outPath,
     JSON.stringify({ version: 3, cachedAt: new Date().toISOString(), source: 'remote-refresh', tables }, null, 2),
