@@ -314,14 +314,16 @@ function mergeWithBeatmaniaFallback(primary, fallback) {
   };
   const catIndex = new Map(out.categories.map((cat, idx) => [cat.category, idx]));
   const seen = new Set();
-  const byTitle = new Map();
+  const byTitleType = new Map();
   for (const cat of out.categories) {
     for (const item of cat.items || []) {
       const data = item?.data || {};
       seen.add(`${data.title || ''}|${data.type || ''}`);
       const tKey = looseTitle(data.title || '') || normTitle(data.title || '');
-      if (tKey && !byTitle.has(tKey)) {
-        byTitle.set(tKey, item);
+      const type = String(data.type || 'A').trim().toUpperCase();
+      const mapKey = tKey ? `${tKey}|${type}` : '';
+      if (mapKey && !byTitleType.has(mapKey)) {
+        byTitleType.set(mapKey, item);
       }
     }
   }
@@ -342,15 +344,10 @@ function mergeWithBeatmaniaFallback(primary, fallback) {
       const key = `${data.title || ''}|${data.type || ''}`;
       if (!data.title || seen.has(key)) continue;
       const tKey = looseTitle(data.title || '') || normTitle(data.title || '');
-      const existing = tKey ? byTitle.get(tKey) : null;
+      const type = String(data.type || 'A').trim().toUpperCase();
+      const mapKey = tKey ? `${tKey}|${type}` : '';
+      const existing = mapKey ? byTitleType.get(mapKey) : null;
       if (existing?.data) {
-        if (existing.data.implicitType && existing.data.type !== data.type) {
-          const oldKey = `${existing.data.title || ''}|${existing.data.type || ''}`;
-          existing.data.type = data.type || 'A';
-          existing.data.implicitType = false;
-          seen.delete(oldKey);
-          seen.add(`${existing.data.title || ''}|${existing.data.type || ''}`);
-        }
         ['bpm', 'atwikiNotes', 'typeInfo', 'notes', 'level', 'id', 'version'].forEach((k) => {
           if ((existing.data[k] == null || existing.data[k] === '' || existing.data[k] === 0) && data[k] != null && data[k] !== '') {
             existing.data[k] = data[k];
@@ -361,7 +358,7 @@ function mergeWithBeatmaniaFallback(primary, fallback) {
       seen.add(key);
       const next = { data: { title: data.title, type: data.type || 'A', implicitType: false } };
       targetItems.push(next);
-      if (tKey && !byTitle.has(tKey)) byTitle.set(tKey, next);
+      if (mapKey && !byTitleType.has(mapKey)) byTitleType.set(mapKey, next);
     }
   }
   for (const cat of out.categories) {
@@ -406,8 +403,8 @@ function mergeSupplementalIntoAtwikiBase(base, supplemental) {
       if (seen.has(k1) || seen.has(k2)) return;
       const next = { data: { ...data } };
       if (typeof next.data.implicitType !== 'undefined') delete next.data.implicitType;
-      if (idx != null) out.categories[idx].items.push(next);
-      else if (isInfCategory) infExclusive.push(next);
+      const shouldGoInf = isInfCategory || shouldTreatAsInfinitasExclusive(next.data);
+      if (idx != null && !shouldGoInf) out.categories[idx].items.push(next);
       else infExclusive.push(next);
       seen.add(k1);
       seen.add(k2);
@@ -486,6 +483,70 @@ function mergeRankItemDataMissing(targetData, sourceData) {
   });
 }
 
+function isEmptyLike(value) {
+  if (value == null) return true;
+  const s = String(value).trim();
+  return !s || s === '-';
+}
+
+function rankItemLooseKey(data) {
+  const title = String(data?.title || '').trim();
+  const type = String(data?.type || 'A').trim().toUpperCase();
+  if (!title) return '';
+  return `${looseTitle(title)}|${type}`;
+}
+
+function shouldTreatAsInfinitasExclusive(data) {
+  const type = String(data?.type || '').trim().toUpperCase();
+  if (type !== 'L') return false;
+  const hasCpi = Number(data?.cpiHc || 0) > 0 || Number(data?.cpiEx || 0) > 0;
+  if (hasCpi) return false;
+  const hasAtwikiMeta = Number(data?.atwikiNotes || 0) > 0 || !isEmptyLike(data?.bpm) || !isEmptyLike(data?.typeInfo);
+  return !hasAtwikiMeta;
+}
+
+function moveInfinitasExclusiveItems(table) {
+  if (!table?.categories) return;
+  const infKey = categoryKey('INFINITAS 전용곡');
+  let infIdx = table.categories.findIndex((cat) => categoryKey(cat?.category) === infKey);
+  if (infIdx < 0) {
+    infIdx = table.categories.length;
+    table.categories.push({ category: 'INFINITAS 전용곡', sortindex: infIdx, items: [] });
+  }
+  const infItems = table.categories[infIdx].items || [];
+  table.categories[infIdx].items = infItems;
+  const infSeen = new Map();
+  infItems.forEach((item) => {
+    const key = rankItemLooseKey(item?.data || {});
+    if (key && !infSeen.has(key)) infSeen.set(key, item);
+  });
+
+  table.categories.forEach((cat, idx) => {
+    if (idx === infIdx) return;
+    const kept = [];
+    (cat.items || []).forEach((item) => {
+      const data = item?.data || {};
+      if (!shouldTreatAsInfinitasExclusive(data)) {
+        kept.push(item);
+        return;
+      }
+      const key = rankItemLooseKey(data);
+      if (!key) {
+        kept.push(item);
+        return;
+      }
+      const existing = infSeen.get(key);
+      if (existing?.data) {
+        mergeRankItemDataMissing(existing.data, data);
+      } else {
+        infItems.push(item);
+        infSeen.set(key, item);
+      }
+    });
+    cat.items = kept;
+  });
+}
+
 function dedupeRankTable(table) {
   if (!table?.categories) return table;
   (table.categories || []).forEach((cat) => {
@@ -515,7 +576,10 @@ function dedupeRankTable(table) {
 
 function dedupeRankTablesPayload(tables) {
   if (!tables || typeof tables !== 'object') return tables;
-  Object.values(tables).forEach((table) => dedupeRankTable(table));
+  Object.values(tables).forEach((table) => {
+    moveInfinitasExclusiveItems(table);
+    dedupeRankTable(table);
+  });
   return tables;
 }
 
