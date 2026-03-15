@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { exec } = require('child_process');
-const { PDFParse } = require('pdf-parse');
 
 const RANK_TABLE_URLS = {
   SP10H: 'https://beatmania.app/!/SP10H/',
@@ -21,8 +20,6 @@ const ATWIKI_TABLE_URLS = {
   SP12H: 'https://w.atwiki.jp/bemani2sp11/pages/18.html'
 };
 const RADAR_AXES = ['NOTES', 'PEAK', 'SCRATCH', 'SOFLAN', 'CHARGE', 'CHORD'];
-const NOTES_RADAR_DRIVE_FOLDER_ID = '1vsHfrRj__nFks3UlZlLqIjHNSkY8E5ep';
-const NOTES_RADAR_TIME_SKEW_MS = 10 * 60 * 1000;
 
 function getStatePath() {
   return path.join(app.getPath('userData'), 'state.json');
@@ -36,20 +33,8 @@ function getBundledRankCachePath() {
   return path.join(app.getAppPath(), 'assets', 'rankTablesCache.json');
 }
 
-function getBundledNotesRadarPath() {
-  return path.join(app.getAppPath(), 'assets', 'notes-radar-sp.json');
-}
-
-function getBundledNotesRadarExtraPath() {
-  return path.join(app.getAppPath(), 'assets', 'notes-radar-sp-extra.json');
-}
-
-function getUserNotesRadarPath() {
-  return path.join(app.getPath('userData'), 'notes-radar-sp.json');
-}
-
-function getUserNotesRadarMetaPath() {
-  return path.join(app.getPath('userData'), 'notes-radar-sp.meta.json');
+function getBundledSongRadarCsvPath() {
+  return path.join(app.getAppPath(), 'assets', 'song-radar-sp.csv');
 }
 
 function readState() {
@@ -433,15 +418,7 @@ function extractTabledata(html) {
 }
 
 function readNotesRadarData() {
-  const user = readJsonSafe(getUserNotesRadarPath());
-  const bundled = readBundledNotesRadarDataSafe();
-  const hasUserCharts = Array.isArray(user?.charts) && user.charts.length > 0;
-  const hasBundledCharts = Array.isArray(bundled?.charts) && bundled.charts.length > 0;
-  if (hasUserCharts) {
-    return mergeNotesRadarPayloadAddOnly(user, bundled).payload;
-  }
-  if (hasBundledCharts) return bundled;
-  return null;
+  return readSongRadarCsvPayload(getBundledSongRadarCsvPath());
 }
 
 function parseCsvLine(line) {
@@ -642,7 +619,7 @@ function hasPositiveRadar(radar) {
 
 function buildRuntimeRadarEntryFromCsv(row) {
   const title = normalizeRadarTitle(row?.title_ascii || row?.title || '');
-  const type = mapChartType(row?.chart_name, row?.chart_index);
+  const type = mapChartType(row?.chart_name || row?.chart, row?.chart_index);
   if (!title || !type) return null;
   const radar = {
     NOTES: toRadarScale100(row?.radar_notes),
@@ -663,12 +640,59 @@ function buildRuntimeRadarEntryFromCsv(row) {
   };
 }
 
-function readBundledNotesRadarDataSafe() {
-  const bundled = readJsonSafe(getBundledNotesRadarPath());
-  const base = bundled && Array.isArray(bundled.charts) ? bundled : { generatedAt: nowIso(), charts: [], count: 0 };
-  const extra = readJsonSafe(getBundledNotesRadarExtraPath());
-  if (!extra || !Array.isArray(extra.charts) || !extra.charts.length) return base;
-  return mergeNotesRadarPayloadAddOnly(base, extra).payload;
+function readSongRadarCsvPayload(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const rows = parseCsvRecords(filePath);
+  const charts = rows.map(buildRuntimeRadarEntryFromCsv).filter(Boolean);
+  if (!charts.length) return null;
+  return {
+    generatedAt: nowIso(),
+    sourceDir: path.dirname(filePath),
+    csvPath: filePath,
+    count: charts.length,
+    charts
+  };
+}
+
+function describeSongRadarCsv(filePath, source) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const rows = parseCsvRecords(filePath);
+  if (!rows.length) return null;
+  const validRows = rows.filter((row) => {
+    const playStyle = String(row?.play_style || '').trim().toUpperCase();
+    const chart = String(row?.chart_name || row?.chart || '').trim().toUpperCase();
+    return playStyle === 'SP' || chart.startsWith('SP');
+  });
+  if (!validRows.length) return null;
+  const stat = fs.statSync(filePath);
+  const firstVersion = validRows
+    .map((row) => String(row?.catalog_version || '').trim())
+    .find(Boolean);
+  return {
+    path: filePath,
+    source,
+    rowCount: validRows.length,
+    catalogVersion: firstVersion || '',
+    updatedAt: stat?.mtime ? stat.mtime.toISOString() : ''
+  };
+}
+
+function ensureSongRadarCatalogReady(progress) {
+  const log = typeof progress === 'function' ? progress : () => {};
+  const active = describeSongRadarCsv(getBundledSongRadarCsvPath(), 'bundled');
+  if (!active) {
+    return { ok: false, error: 'song_radar_csv_missing' };
+  }
+  log('패키징된 악곡 노트 레이더 CSV를 확인했습니다.');
+  return {
+    ok: true,
+    needsUpdate: false,
+    updated: false,
+    songRadarPath: active.path,
+    songRadarRowCount: active.rowCount,
+    catalogVersion: active.catalogVersion,
+    updatedAt: active.updatedAt
+  };
 }
 
 function nowIso() {
@@ -699,6 +723,24 @@ function cloneNotesRadarPayload(payload) {
   };
 }
 
+function mergeNotesRadarPayloadPreferIncoming(basePayload, incomingPayload) {
+  const base = cloneNotesRadarPayload(basePayload || { generatedAt: nowIso(), charts: [], count: 0 });
+  const merged = new Map();
+  (base.charts || []).forEach((row) => {
+    if (!row?.title) return;
+    merged.set(radarKeyOf(row.title, row.type), row);
+  });
+  (incomingPayload?.charts || []).forEach((row) => {
+    const next = normalizeNotesRadarChart(row);
+    if (!next) return;
+    merged.set(radarKeyOf(next.title, next.type), next);
+  });
+  base.charts = [...merged.values()];
+  base.count = base.charts.length;
+  base.generatedAt = incomingPayload?.generatedAt || base.generatedAt || nowIso();
+  return { payload: base, added: Math.max(0, base.count - (Array.isArray(basePayload?.charts) ? basePayload.charts.length : 0)) };
+}
+
 function normalizeNotesRadarType(value) {
   const t = String(value || '').trim().toUpperCase();
   return /^[BNHAL]$/.test(t) ? t : '';
@@ -722,217 +764,6 @@ function normalizeNotesRadarChart(row) {
     notes: Number(row?.notes || 0),
     radar,
     radarTop: String(row?.radarTop || dominantAxis(radar)).trim().toUpperCase()
-  };
-}
-
-function mergeNotesRadarPayloadAddOnly(basePayload, incomingPayload) {
-  const base = cloneNotesRadarPayload(basePayload || { generatedAt: nowIso(), charts: [], count: 0 });
-  const chartIndex = new Set(
-    (base.charts || [])
-      .filter((x) => String(x?.title || '').trim())
-      .map((x) => radarKeyOf(x.title, x.type))
-  );
-  let added = 0;
-  for (const row of incomingPayload?.charts || []) {
-    const next = normalizeNotesRadarChart(row);
-    if (!next) continue;
-    const key = radarKeyOf(next.title, next.type);
-    if (chartIndex.has(key)) continue;
-    base.charts.push(next);
-    chartIndex.add(key);
-    added += 1;
-  }
-  base.count = Array.isArray(base.charts) ? base.charts.length : 0;
-  return { payload: base, added };
-}
-
-function getRadarHudMergedCacheCsvPath() {
-  const localRoot = process.env.LOCALAPPDATA || app.getPath('home');
-  return path.join(localRoot, 'INFINITAS Table Maker', 'radar-hud', 'cache', 'radar_with_title_fixed.csv');
-}
-
-function ensureAbyssHudFallbackRows(progress) {
-  const log = (msg) => {
-    try { progress?.(msg); } catch { /* ignore */ }
-  };
-  const csvPath = getRadarHudMergedCacheCsvPath();
-  if (!fs.existsSync(csvPath)) {
-    return { changed: false, reason: 'csv_not_found', csvPath };
-  }
-  const text = fs.readFileSync(csvPath, 'utf8');
-  const lines = String(text || '').split(/\r?\n/g);
-  if (!lines.length || !String(lines[0] || '').trim()) {
-    return { changed: false, reason: 'empty_csv', csvPath };
-  }
-  const header = parseCsvLine(lines[0]).map((x) => String(x || '').trim());
-  const has = new Set(
-    parseCsvRecords(csvPath)
-      .filter((row) => normalizeRadarTitle(row?.title_ascii || row?.title || '') === 'Abyss -The Heavens Remix-')
-      .map((row) => String(row?.chart_name || '').trim().toUpperCase())
-  );
-  const fallbackRows = [
-    {
-      song_id: 9051,
-      title_ascii: 'Abyss -The Heavens Remix-',
-      chart_index: 0,
-      chart_name: 'SPB',
-      level: 3,
-      note_count: 288,
-      total_seconds: 0,
-      bpm_min: 0,
-      bpm_max: 0,
-      radar_notes: 0.2453,
-      radar_peak: 0.2142,
-      radar_scratch: 0.2172,
-      radar_soflan: 0,
-      radar_charge: 0,
-      radar_chord: 0.004,
-      source: 'manual_seed'
-    },
-    {
-      song_id: 9051,
-      title_ascii: 'Abyss -The Heavens Remix-',
-      chart_index: 1,
-      chart_name: 'SPN',
-      level: 7,
-      note_count: 766,
-      total_seconds: 0,
-      bpm_min: 0,
-      bpm_max: 0,
-      radar_notes: 0.6525,
-      radar_peak: 0.5714,
-      radar_scratch: 0.391,
-      radar_soflan: 0,
-      radar_charge: 0,
-      radar_chord: 0.2481,
-      source: 'manual_seed'
-    },
-    {
-      song_id: 9051,
-      title_ascii: 'Abyss -The Heavens Remix-',
-      chart_index: 4,
-      chart_name: 'SPL',
-      level: 11,
-      note_count: 1637,
-      total_seconds: 0,
-      bpm_min: 0,
-      bpm_max: 0,
-      radar_notes: 0,
-      radar_peak: 0,
-      radar_scratch: 0,
-      radar_soflan: 0,
-      radar_charge: 0,
-      radar_chord: 0,
-      source: 'manual_seed'
-    }
-  ];
-  const appendLines = [];
-  let added = 0;
-  for (const row of fallbackRows) {
-    if (has.has(row.chart_name)) continue;
-    const cols = header.map((key) => row[key] ?? '');
-    appendLines.push(formatCsvLine(cols));
-    added += 1;
-  }
-  if (!appendLines.length) {
-    return { changed: false, reason: 'already_present', csvPath };
-  }
-  const suffix = (text.endsWith('\n') ? '' : '\n') + appendLines.join('\n') + '\n';
-  fs.appendFileSync(csvPath, suffix, 'utf8');
-  log(`노트 레이더 HUD 캐시 보정: Abyss SPB/SPN/SPL ${added}건 추가`);
-  return { changed: true, csvPath, added };
-}
-
-function mergeHudSurveyCacheIntoNotesRadar(progress) {
-  const log = (msg) => {
-    try { progress?.(msg); } catch { /* ignore */ }
-  };
-  const csvPath = getRadarHudMergedCacheCsvPath();
-  if (!fs.existsSync(csvPath)) {
-    return {
-      changed: false,
-      reason: 'csv_not_found',
-      csvPath
-    };
-  }
-
-  const rows = parseCsvRecords(csvPath);
-  const runtimeCharts = rows.map(buildRuntimeRadarEntryFromCsv).filter(Boolean);
-  if (!runtimeCharts.length) {
-    return {
-      changed: false,
-      reason: 'no_runtime_rows',
-      csvPath,
-      rowCount: rows.length
-    };
-  }
-
-  const base = readNotesRadarData() || readBundledNotesRadarDataSafe();
-  const next = cloneNotesRadarPayload(base);
-  const official = readBundledNotesRadarDataSafe();
-  const officialKeys = new Set(
-    (official.charts || [])
-      .filter((x) => String(x?.title || '').trim() && hasPositiveRadar(x?.radar))
-      .map((x) => radarKeyOf(x.title, x.type))
-  );
-
-  const chartIndex = new Map();
-  next.charts.forEach((x, idx) => {
-    if (!x?.title) return;
-    chartIndex.set(radarKeyOf(x.title, x.type), idx);
-  });
-
-  let added = 0;
-  let updated = 0;
-  let skippedOfficial = 0;
-  for (const row of runtimeCharts) {
-    const key = radarKeyOf(row.title, row.type);
-    const at = chartIndex.get(key);
-    if (officialKeys.has(key)) {
-      skippedOfficial += 1;
-      continue;
-    }
-    if (at == null) {
-      next.charts.push(row);
-      chartIndex.set(key, next.charts.length - 1);
-      added += 1;
-      continue;
-    }
-    next.charts[at] = { ...row };
-    updated += 1;
-  }
-
-  if (added === 0 && updated === 0) {
-    return {
-      changed: false,
-      reason: 'no_changes',
-      csvPath,
-      rowCount: rows.length,
-      runtimeCount: runtimeCharts.length,
-      skippedOfficial
-    };
-  }
-
-  next.generatedAt = nowIso();
-  next.count = Array.isArray(next.charts) ? next.charts.length : 0;
-  next.sourceDir = next.sourceDir || path.dirname(csvPath);
-  next.runtimeCacheMergedAt = nowIso();
-  next.runtimeCachePath = csvPath;
-
-  const outPath = getUserNotesRadarPath();
-  ensureDir(path.dirname(outPath));
-  fs.writeFileSync(outPath, JSON.stringify(next, null, 2), 'utf8');
-
-  log(`노트 레이더 캐시 병합 완료: +${added} / ~${updated} (공식 데이터 유지 ${skippedOfficial})`);
-  return {
-    changed: true,
-    csvPath,
-    outPath,
-    rowCount: rows.length,
-    runtimeCount: runtimeCharts.length,
-    added,
-    updated,
-    skippedOfficial
   };
 }
 
@@ -1019,34 +850,6 @@ function normalizeRadarTitle(s) {
     .trim();
 }
 
-function detectAxisFromName(fileName) {
-  const upper = String(fileName || '').toUpperCase();
-  return RADAR_AXES.find((axis) => upper.includes(axis)) || '';
-}
-
-function parseRadarRowsFromText(text) {
-  const rows = [];
-  String(text || '')
-    .split(/\r?\n/g)
-    .forEach((line) => {
-      if (!line || !line.includes('\t')) return;
-      const cols = line
-        .split('\t')
-        .map((x) => x.replace(/\s+/g, ' ').trim())
-        .filter(Boolean);
-      if (cols.length < 5) return;
-      if (cols[1] !== 'SP') return;
-      const type = (cols[2] || '').toUpperCase();
-      if (!/^[HAL]$/.test(type)) return;
-      const notes = Number(String(cols[3] || '').replace(/[^\d]/g, '')) || 0;
-      const score = Number(String(cols[4] || '').replace(/[^\d.]/g, '')) || 0;
-      const title = normalizeRadarTitle(cols[0]);
-      if (!title || notes <= 0 || score <= 0) return;
-      rows.push({ title, type, notes, score });
-    });
-  return rows;
-}
-
 function radarKeyOf(title, type) {
   return `${normalizeRadarTitle(title)}|${String(type || 'A').toUpperCase()}`;
 }
@@ -1062,175 +865,6 @@ function dominantAxis(radar) {
     }
   });
   return best;
-}
-
-async function parseRadarPdf(filePath, axis) {
-  const parser = new PDFParse({ data: fs.readFileSync(filePath) });
-  try {
-    const result = await parser.getText();
-    const rows = parseRadarRowsFromText(result?.text || '');
-    return rows.map((r) => ({ ...r, axis }));
-  } finally {
-    await parser.destroy();
-  }
-}
-
-async function buildNotesRadarJsonFromPdfDir(sourceDir) {
-  const pdfFiles = fs
-    .readdirSync(sourceDir)
-    .filter((name) => /\.pdf$/i.test(name))
-    .map((name) => ({ name, axis: detectAxisFromName(name) }))
-    .filter((x) => !!x.axis);
-  if (!pdfFiles.length) throw new Error(`No radar pdf files found in ${sourceDir}`);
-  const merged = new Map();
-  for (const file of pdfFiles) {
-    const full = path.join(sourceDir, file.name);
-    const rows = await parseRadarPdf(full, file.axis);
-    rows.forEach((row) => {
-      const key = radarKeyOf(row.title, row.type);
-      const prev = merged.get(key) || {
-        title: row.title,
-        type: row.type,
-        notes: row.notes,
-        radar: { NOTES: 0, PEAK: 0, SCRATCH: 0, SOFLAN: 0, CHARGE: 0, CHORD: 0 }
-      };
-      prev.notes = prev.notes || row.notes;
-      prev.radar[row.axis] = row.score;
-      merged.set(key, prev);
-    });
-  }
-  const charts = [...merged.values()]
-    .map((x) => ({ ...x, radarTop: dominantAxis(x.radar) }))
-    .sort((a, b) => {
-      const t = a.title.localeCompare(b.title);
-      if (t !== 0) return t;
-      return a.type.localeCompare(b.type);
-    });
-  return {
-    generatedAt: new Date().toISOString(),
-    sourceDir,
-    count: charts.length,
-    charts
-  };
-}
-
-function extractDriveFileIdsFromFolderHtml(html) {
-  const ids = new Set();
-  const re = /\/file\/d\/([a-zA-Z0-9_-]{20,})\/view/g;
-  let m;
-  while ((m = re.exec(String(html || '')))) ids.add(m[1]);
-  return [...ids];
-}
-
-function parseMetaContent(html, itemProp) {
-  const re = new RegExp(`<meta\\s+itemprop=["']${itemProp}["']\\s+content=["']([^"']+)["']`, 'i');
-  const m = String(html || '').match(re);
-  return m ? decodeHtmlEntities(m[1]).trim() : '';
-}
-
-function parseDateMsFlexible(v) {
-  const s = String(v || '').trim();
-  if (!s) return 0;
-  const ms = Date.parse(s);
-  if (Number.isFinite(ms)) return ms;
-  const ms2 = Date.parse(s.replace(/\./g, '-'));
-  return Number.isFinite(ms2) ? ms2 : 0;
-}
-
-async function fetchDriveRadarFileMetas() {
-  const folderUrl = `https://drive.google.com/embeddedfolderview?id=${NOTES_RADAR_DRIVE_FOLDER_ID}#list`;
-  const folderHtml = await fetchHtml(folderUrl);
-  const ids = extractDriveFileIdsFromFolderHtml(folderHtml);
-  const metas = [];
-  for (const id of ids) {
-    const fileHtml = await fetchHtml(`https://drive.google.com/file/d/${id}/view`);
-    const name = parseMetaContent(fileHtml, 'name');
-    const axis = detectAxisFromName(name);
-    if (!axis || !/\.pdf$/i.test(name)) continue;
-    const upperName = String(name || '').toUpperCase();
-    if (!upperName.includes('SP_') || upperName.includes('DP_')) continue;
-    const modifiedRaw = parseMetaContent(fileHtml, 'dateModified');
-    const modifiedMs = parseDateMsFlexible(modifiedRaw);
-    metas.push({
-      id,
-      name,
-      axis,
-      modifiedRaw,
-      modifiedMs,
-      downloadUrl: `https://drive.google.com/uc?export=download&id=${id}`
-    });
-  }
-  const byAxis = new Map();
-  metas.forEach((m) => {
-    const prev = byAxis.get(m.axis);
-    if (!prev || (m.modifiedMs || 0) > (prev.modifiedMs || 0)) byAxis.set(m.axis, m);
-  });
-  return [...byAxis.values()];
-}
-
-function shouldUpdateNotesRadar(remoteFiles, localMeta) {
-  if (!Array.isArray(remoteFiles) || remoteFiles.length === 0) return false;
-  if (!localMeta?.files) return true;
-  return remoteFiles.some((f) => {
-    const prev = localMeta.files[f.id];
-    const prevMs = Number(prev?.modifiedMs || 0);
-    const nextMs = Number(f.modifiedMs || 0);
-    if (!nextMs) return false;
-    return nextMs > prevMs + NOTES_RADAR_TIME_SKEW_MS;
-  });
-}
-
-async function maybeUpdateNotesRadarFromDrive(progress) {
-  const log = (msg) => {
-    try { progress?.(msg); } catch { /* ignore */ }
-  };
-  log('1/2 노트 레이더: Google Drive PDF 최신 여부를 확인합니다. (출처: notesradarbot Google Drive)');
-  const remoteFiles = await fetchDriveRadarFileMetas();
-  if (!remoteFiles.length) {
-    log('노트 레이더: Drive에서 SP PDF를 찾지 못해 기존 데이터를 유지합니다.');
-    return { updated: false, reason: 'no_remote_files' };
-  }
-  const localMeta = readJsonSafe(getUserNotesRadarMetaPath());
-  if (!shouldUpdateNotesRadar(remoteFiles, localMeta)) {
-    log('노트 레이더: 기존 로컬 데이터가 최신입니다. (UTC/KST 시간 오차 허용 비교 적용)');
-    return { updated: false, reason: 'up_to_date', files: remoteFiles };
-  }
-
-  const tempDir = path.join(app.getPath('userData'), 'notes-radar-download');
-  if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
-  ensureDir(tempDir);
-  for (const f of remoteFiles) {
-    log(`노트 레이더 다운로드: ${f.name}`);
-    await downloadToFile(f.downloadUrl, path.join(tempDir, f.name));
-  }
-  const payload = await buildNotesRadarJsonFromPdfDir(tempDir);
-  if (!payload || !Array.isArray(payload.charts) || Number(payload.count || 0) <= 0) {
-    log('노트 레이더: PDF 파싱 결과가 0건이라 기존 데이터를 유지합니다.');
-    return { updated: false, reason: 'empty_payload', files: remoteFiles };
-  }
-  const base = readNotesRadarData() || readBundledNotesRadarDataSafe();
-  const merged = mergeNotesRadarPayloadAddOnly(base, payload);
-  const outPath = getUserNotesRadarPath();
-  if (merged.added > 0) {
-    merged.payload.generatedAt = nowIso();
-    merged.payload.sourceDir = payload.sourceDir || merged.payload.sourceDir || '';
-    ensureDir(path.dirname(outPath));
-    fs.writeFileSync(outPath, JSON.stringify(merged.payload, null, 2), 'utf8');
-  }
-  const metaOut = {
-    folderId: NOTES_RADAR_DRIVE_FOLDER_ID,
-    checkedAt: new Date().toISOString(),
-    files: Object.fromEntries(
-      remoteFiles.map((f) => [f.id, { name: f.name, axis: f.axis, modifiedRaw: f.modifiedRaw, modifiedMs: f.modifiedMs }])
-    )
-  };
-  fs.writeFileSync(getUserNotesRadarMetaPath(), JSON.stringify(metaOut, null, 2), 'utf8');
-  if (merged.added > 0) {
-    log(`노트 레이더 업데이트 완료: 추가된 곡 ${merged.added}건 반영 (총 ${merged.payload.count} charts)`);
-    return { updated: true, count: merged.payload.count, added: merged.added, files: remoteFiles };
-  }
-  log('노트 레이더 업데이트 완료: 추가된 곡이 없어 기존 데이터를 유지합니다.');
-  return { updated: false, reason: 'no_new_charts', count: base?.count || 0, files: remoteFiles };
 }
 
 async function fetchRankTables() {
@@ -1320,14 +954,62 @@ let refluxWarnedNoTracker = false;
 let refluxGameWasRunning = false;
 let refluxTrackerUpdatedAfterGame = false;
 let refluxReadySent = false;
-let refluxHudAutoInjectEnabled = false;
-let refluxHudInjectedPid = 0;
+let songRadarWatchers = [];
+let songRadarNotifyTimer = null;
 
 
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
+}
+
+function closeSongRadarWatchers() {
+  songRadarWatchers.forEach((watcher) => {
+    try {
+      watcher.close();
+    } catch {
+      // ignore
+    }
+  });
+  songRadarWatchers = [];
+}
+
+function scheduleSongRadarCatalogChanged(payload = {}) {
+  if (songRadarNotifyTimer) clearTimeout(songRadarNotifyTimer);
+  songRadarNotifyTimer = setTimeout(() => {
+    songRadarNotifyTimer = null;
+    sendToRenderer('songradar:changed', {
+      changedAt: nowIso(),
+      ...payload
+    });
+  }, 250);
+}
+
+function watchSongRadarCatalogFile(filePath, source) {
+  if (!filePath) return;
+  const dirPath = path.dirname(filePath);
+  const fileName = path.basename(filePath);
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    const watcher = fs.watch(dirPath, (_eventType, changedName) => {
+      const changed = String(changedName || '').trim();
+      if (changed && changed !== fileName) return;
+      scheduleSongRadarCatalogChanged({
+        source,
+        path: filePath,
+        exists: fs.existsSync(filePath)
+      });
+    });
+    songRadarWatchers.push(watcher);
+  } catch {
+    // ignore watcher setup failures
+  }
+}
+
+function startSongRadarCatalogWatchers() {
+  closeSongRadarWatchers();
+  watchSongRadarCatalogFile(getBundledSongRadarCsvPath(), 'bundled');
 }
 
 function stopRefluxInternal() {
@@ -1365,54 +1047,7 @@ function parseTasklistHasBm2dx(stdout) {
   return s.includes('bm2dx.exe');
 }
 
-function getRadarHudToolPaths() {
-  const candidates = [
-    path.join(process.resourcesPath || '', 'radar-hud'),
-    path.join(app.getAppPath(), 'radar-hud'),
-    path.join(__dirname, 'radar-hud'),
-    path.join('D:\\client\\build\\bin\\x64\\Release')
-  ];
-  for (const dir of candidates) {
-    const injector = path.join(dir, 'iidx_chart_tap_injector.exe');
-    const dll = path.join(dir, 'iidx_overlay_radar_only.dll');
-    if (fs.existsSync(injector) && fs.existsSync(dll)) {
-      return { injector, dll };
-    }
-  }
-  return null;
-}
-
-async function getBm2dxPid() {
-  try {
-    const cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Process bm2dx -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id)"';
-    const out = await execAsync(cmd);
-    const m = String(out.stdout || '').match(/(\d+)/);
-    return m ? Number(m[1]) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-async function tryInjectRadarHud() {
-  if (!refluxHudAutoInjectEnabled || refluxHudInjectedPid) return;
-  const pid = await getBm2dxPid();
-  if (!pid) return;
-  const tools = getRadarHudToolPaths();
-  if (!tools) {
-    sendToRenderer('reflux:log', '노트 레이더 HUD 파일을 찾지 못했습니다. (injector/dll)');
-    return;
-  }
-  try {
-    const cmd = `"${tools.injector}" --pid ${pid} --dll "${tools.dll}"`;
-    await execAsync(cmd);
-    refluxHudInjectedPid = pid;
-    sendToRenderer('reflux:log', `노트 레이더 HUD 주입 완료 (PID ${pid})`);
-  } catch (e) {
-    sendToRenderer('reflux:log', `노트 레이더 HUD 주입 실패: ${e.message}`);
-  }
-}
-
-function startRefluxMonitor(exePath, options = {}) {
+function startRefluxMonitor(exePath) {
   const trackerPath = path.join(path.dirname(exePath), 'tracker.tsv');
   refluxLastTrackerMtime = 0;
   refluxGameDetected = false;
@@ -1420,8 +1055,6 @@ function startRefluxMonitor(exePath, options = {}) {
   refluxGameWasRunning = false;
   refluxTrackerUpdatedAfterGame = false;
   refluxReadySent = false;
-  refluxHudAutoInjectEnabled = options.noteRadarHudEnabled === true;
-  refluxHudInjectedPid = 0;
   const startedAt = Date.now();
   refluxMonitorTimer = setInterval(() => {
     exec('tasklist /FI "IMAGENAME eq bm2dx.exe"', (err, stdout) => {
@@ -1432,29 +1065,14 @@ function startRefluxMonitor(exePath, options = {}) {
           sendToRenderer('reflux:status', { running: true, gameDetected: true });
         }
         if (found) {
-          tryInjectRadarHud();
-        }
-        if (found) {
           refluxGameWasRunning = true;
         } else if (refluxGameWasRunning && !refluxReadySent) {
           refluxGameWasRunning = false;
-          refluxHudInjectedPid = 0;
           if (refluxTrackerUpdatedAfterGame && refluxLastTrackerMtime > 0) {
-            try {
-              const merged = mergeHudSurveyCacheIntoNotesRadar((msg) => sendToRenderer('reflux:log', msg));
-              if (!merged?.changed && merged?.reason === 'csv_not_found') {
-                sendToRenderer('reflux:log', '노트 레이더 조사 캐시 CSV를 찾지 못해 기존 레이더 데이터를 유지합니다.');
-              } else if (!merged?.changed && merged?.reason === 'no_runtime_rows') {
-                sendToRenderer('reflux:log', '노트 레이더 조사 캐시에서 병합 가능한 행을 찾지 못했습니다.');
-              } else if (merged?.changed) {
-                sendToRenderer(
-                  'reflux:log',
-                  `노트 레이더 조사 캐시 반영: 추가 ${merged.added}, 갱신 ${merged.updated}, 공식 유지 ${merged.skippedOfficial}`
-                );
-              }
-            } catch (e) {
-              sendToRenderer('reflux:log', `노트 레이더 조사 캐시 병합 실패: ${e.message || e}`);
-            }
+            sendToRenderer(
+              'reflux:log',
+              '노트 레이더 조사 캐시는 앱에서 자동 병합하지 않습니다. 개발자용 병합 스크립트로 수동 반영하세요.'
+            );
             try {
               const content = fs.existsSync(trackerPath) ? fs.readFileSync(trackerPath, 'utf8') : '';
               sendToRenderer('reflux:ready', { filePath: trackerPath, content });
@@ -1511,8 +1129,8 @@ function startRefluxMonitor(exePath, options = {}) {
 function getBundledRefluxDir() {
   const candidates = [
     path.join(process.resourcesPath, 'Reflux'),
-    path.join(app.getAppPath(), 'Reflux.1.16.2'),
-    path.join(__dirname, 'Reflux.1.16.2')
+    path.join(app.getAppPath(), 'Reflux.1.16.3'),
+    path.join(__dirname, 'Reflux.1.16.3')
   ];
   return candidates.find((p) => fs.existsSync(path.join(p, 'Reflux.exe'))) || '';
 }
@@ -1523,6 +1141,17 @@ function getRefluxRuntimeDir() {
 
 function getRefluxRuntimeExe() {
   return path.join(getRefluxRuntimeDir(), 'current', 'Reflux.exe');
+}
+
+function getBundledRefluxRevision(bundledDir) {
+  if (!bundledDir) return '';
+  const revPath = path.join(bundledDir, 'itm-revision.txt');
+  if (!fs.existsSync(revPath)) return '';
+  try {
+    return String(fs.readFileSync(revPath, 'utf8') || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 function getRefluxLauncherCmdPath() {
@@ -1609,11 +1238,37 @@ function downloadToFile(url, filePath) {
 async function ensureBundledRefluxInstalled() {
   const bundledDir = getBundledRefluxDir();
   if (!bundledDir) return false;
+  const runtimeDir = getRefluxRuntimeDir();
   const runtimeCurrent = path.join(getRefluxRuntimeDir(), 'current');
   const runtimeExe = path.join(runtimeCurrent, 'Reflux.exe');
-  if (fs.existsSync(runtimeExe)) return true;
+  const metaPath = path.join(runtimeDir, 'meta.json');
+  const bundledRevision = getBundledRefluxRevision(bundledDir);
+  let runtimeRevision = '';
+  let meta = {};
+  if (fs.existsSync(metaPath)) {
+    try {
+      meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) || {};
+      runtimeRevision = String(meta?.bundleRevision || '').trim();
+    } catch {
+      meta = {};
+      runtimeRevision = '';
+    }
+  }
+  const needsSync = !fs.existsSync(runtimeExe) || (!!bundledRevision && bundledRevision !== runtimeRevision);
+  if (!needsSync) return true;
+  if (fs.existsSync(runtimeCurrent)) {
+    fs.rmSync(runtimeCurrent, { recursive: true, force: true });
+  }
   ensureDir(runtimeCurrent);
   fs.cpSync(bundledDir, runtimeCurrent, { recursive: true, force: true });
+  if (bundledRevision) {
+    const nextMeta = {
+      ...meta,
+      bundleRevision: bundledRevision,
+      bundleSyncedAt: new Date().toISOString()
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(nextMeta, null, 2), 'utf8');
+  }
   return fs.existsSync(runtimeExe);
 }
 
@@ -1621,11 +1276,14 @@ async function checkAndUpdateReflux() {
   await ensureBundledRefluxInstalled();
   const runtimeDir = getRefluxRuntimeDir();
   const metaPath = path.join(runtimeDir, 'meta.json');
+  let meta = {};
   let localTag = '';
   if (fs.existsSync(metaPath)) {
     try {
-      localTag = JSON.parse(fs.readFileSync(metaPath, 'utf8'))?.tag || '';
+      meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) || {};
+      localTag = meta?.tag || '';
     } catch {
+      meta = {};
       localTag = '';
     }
   }
@@ -1664,7 +1322,11 @@ async function checkAndUpdateReflux() {
       if (fs.existsSync(currentDir)) fs.rmSync(currentDir, { recursive: true, force: true });
       ensureDir(path.dirname(currentDir));
       fs.cpSync(foundDir, currentDir, { recursive: true, force: true });
-      fs.writeFileSync(metaPath, JSON.stringify({ tag: latestTag, updatedAt: new Date().toISOString() }, null, 2), 'utf8');
+      fs.writeFileSync(
+        metaPath,
+        JSON.stringify({ ...meta, tag: latestTag, updatedAt: new Date().toISOString() }, null, 2),
+        'utf8'
+      );
       updated = true;
     }
     if (fs.existsSync(zipPath)) fs.rmSync(zipPath, { force: true });
@@ -1695,6 +1357,7 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.removeMenu();
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  startSongRadarCatalogWatchers();
 }
 
 function closeOauthPopupWindow() {
@@ -1757,7 +1420,19 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('reflux:ensure', async () => {
-    return checkAndUpdateReflux();
+    const refluxInfo = await checkAndUpdateReflux();
+    let radarCatalog = null;
+    if (refluxInfo?.exists && refluxInfo?.exePath) {
+      try {
+        radarCatalog = ensureSongRadarCatalogReady();
+      } catch (e) {
+        radarCatalog = {
+          ok: false,
+          error: String(e?.message || e || 'unknown_error')
+        };
+      }
+    }
+    return { ...refluxInfo, radarCatalog };
   });
 
   ipcMain.handle('tsv:save', async (_event, { fileName, content }) => {
@@ -1773,7 +1448,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle('reflux:start', async (_event, payload = {}) => {
     const exePath = payload?.exePath;
-    const hudEnabledFromPayload = payload?.noteRadarHudEnabled === true;
     let pathToRun = exePath;
     if (!pathToRun || !fs.existsSync(pathToRun)) {
       const ensured = await checkAndUpdateReflux();
@@ -1785,10 +1459,9 @@ app.whenReady().then(() => {
     if (refluxMonitorTimer) {
       return { started: true, alreadyRunning: true };
     }
-    try {
-      ensureAbyssHudFallbackRows((msg) => sendToRenderer('reflux:log', msg));
-    } catch (e) {
-      sendToRenderer('reflux:log', `노트 레이더 HUD 캐시 보정 실패: ${e.message || e}`);
+    const radarCatalog = ensureSongRadarCatalogReady((msg) => sendToRenderer('reflux:log', msg));
+    if (!radarCatalog?.ok) {
+      throw new Error(`악곡 노트 레이더 카탈로그 준비 실패: ${radarCatalog?.error || 'unknown_error'}`);
     }
     const workDir = path.dirname(pathToRun);
     const cmdLine = `/k title Reflux Console && cd /d "${workDir}" && "${pathToRun}"`;
@@ -1810,10 +1483,8 @@ app.whenReady().then(() => {
     refluxProcess = startedPid ? { pid: startedPid } : null;
     sendToRenderer('reflux:status', { running: true, gameDetected: false });
     sendToRenderer('reflux:log', 'Reflux 콘솔 창을 실행했습니다. 콘솔에서 진행 로그를 확인하세요.');
-    startRefluxMonitor(pathToRun, {
-      noteRadarHudEnabled: hudEnabledFromPayload || readState()?.settings?.noteRadarHudEnabled === true
-    });
-    return { started: true, alreadyRunning: false, exePath: pathToRun, pid: startedPid };
+    startRefluxMonitor(pathToRun);
+    return { started: true, alreadyRunning: false, exePath: pathToRun, pid: startedPid, radarCatalog };
   });
 
   ipcMain.handle('reflux:stop', async () => {
@@ -1834,15 +1505,22 @@ app.whenReady().then(() => {
     return tables;
   });
 
+  ipcMain.handle('songradar:get', async () => {
+    return readNotesRadarData();
+  });
+
   ipcMain.handle('ranktables:refresh', async () => {
     const progress = (message) => sendToRenderer('ranktables:progress', { message: String(message || '') });
-    progress('1/2 노트 레이더 갱신을 시작합니다.');
+    progress('패키징된 악곡 노트 레이더 CSV를 확인합니다.');
     try {
-      await maybeUpdateNotesRadarFromDrive(progress);
+      const radarCatalog = ensureSongRadarCatalogReady(progress);
+      if (!radarCatalog?.ok) {
+        progress(`악곡 노트 레이더 CSV 확인 실패: ${radarCatalog?.error || 'unknown_error'} (기존 데이터로 진행)`);
+      }
     } catch (e) {
-      progress(`노트 레이더 갱신 중 경고: ${e.message || e} (기존 데이터로 진행)`);
+      progress(`악곡 노트 레이더 CSV 확인 중 경고: ${e.message || e} (기존 데이터로 진행)`);
     }
-    progress('2/2 서열표 소스(beatmania.app / atwiki / 나무위키) 갱신을 시작합니다.');
+    progress('서열표 소스(beatmania.app / atwiki / 나무위키) 갱신을 시작합니다.');
     const tables = await fetchRankTables();
     writeUserRankCache(tables);
     progress('서열표 데이터 갱신 완료');
@@ -2028,6 +1706,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopRefluxInternal();
   closeOauthPopupWindow();
+  closeSongRadarWatchers();
   if (process.platform !== 'darwin') {
     app.quit();
   }

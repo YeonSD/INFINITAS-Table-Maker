@@ -1,18 +1,16 @@
 {
   "name": "infinitas-rank-table-maker",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Desktop app for IIDX INFINITAS rank table tracking",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:radar-investigated": "node scripts/build-radar-investigated-csv.js",
     "build:portable": "electron-packager . \"INFINITAS Table Maker\" --platform=win32 --arch=x64 --out=dist-portable --overwrite --prune=true --ignore=\"^/dist$\" --ignore=\"^/dist-portable$\"",
     "build:single-exe": "electron-builder --win portable"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
-    "html2canvas": "^1.4.1",
-    "pdf-parse": "^2.4.5"
+    "html2canvas": "^1.4.1"
   },
   "devDependencies": {
     "electron": "^37.2.4",
@@ -26,15 +24,8 @@
     "artifactName": "INFINITAS Table Maker v${version}.${ext}",
     "extraResources": [
       {
-        "from": "Reflux.1.16.2",
+        "from": "Reflux.1.16.3",
         "to": "Reflux",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "radar-hud",
-        "to": "radar-hud",
         "filter": [
           "**/*"
         ]
@@ -47,6 +38,7 @@
       "assets/**/*",
       "package.json",
       "!assets/NotesRader/**",
+      "!assets/song-radar-sp-missing.csv",
       "!docs/**",
       "!scripts/**",
       "!tmp_*.html",

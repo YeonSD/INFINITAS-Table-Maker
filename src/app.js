@@ -49,6 +49,7 @@ function createHistorySectionState() {
 const state = {
   activeTable: 'SP11H',
   rankTables: {},
+  songRadarCatalog: null,
   tableViews: {},
   sortMode: 'name',
   viewMode: 'normal',
@@ -72,7 +73,6 @@ const state = {
   settings: {
     showUpdateGoalCards: true,
     enableHistoryRollback: true,
-    noteRadarHudEnabled: true,
     discoverability: DEFAULT_SOCIAL_SETTINGS.discoverability,
     discoverByDjName: DEFAULT_SOCIAL_SETTINGS.discoverByDjName,
     followPolicy: DEFAULT_SOCIAL_SETTINGS.followPolicy,
@@ -108,6 +108,7 @@ let socialHistoryPopupState = null;
 let goalSendContext = null;
 let songGoalChart = null;
 let appVersionCheckWarned = false;
+let songRadarReloadTimer = null;
 
 const $ = (id) => document.getElementById(id);
 const authContext = (() => {
@@ -259,6 +260,13 @@ function truncate2(v) {
   return Math.floor(n * 100) / 100;
 }
 
+function radarScoreRatio(ex, full) {
+  const exScore = Number(ex || 0);
+  const maxScore = Number(full || 0);
+  if (!Number.isFinite(exScore) || !Number.isFinite(maxScore) || maxScore <= 0) return 0;
+  return exScore / maxScore;
+}
+
 function normalizeChartType(typeRaw) {
   const t = String(typeRaw || '').trim().toUpperCase();
   if (t === 'N' || t === 'H' || t === 'A' || t === 'L') return t;
@@ -356,8 +364,7 @@ function computePlayerRadarProfile() {
       if (notes <= 0 || ex <= 0) return;
       const full = notes * 2;
       if (full <= 0) return;
-      const scoreRatePercent = truncate2((ex / full) * 100);
-      const rateRatio = scoreRatePercent / 100;
+      const rateRatio = radarScoreRatio(ex, full);
       const songKey = titleKey(chart.title || '');
       const curr = perSong.get(songKey) || { title: chart.title || '', axisType: {}, NOTES: 0, PEAK: 0, SCRATCH: 0, SOFLAN: 0, CHARGE: 0, CHORD: 0 };
       if (!curr.title) curr.title = chart.title || '';
@@ -413,7 +420,7 @@ function computeRadarProfileFromRows(rows) {
         if (notes <= 0 || ex <= 0) return;
         const full = notes * 2;
         if (full <= 0) return;
-        const rateRatio = truncate2((ex / full) * 100) / 100;
+        const rateRatio = radarScoreRatio(ex, full);
         const songKey = titleKey(data.title || '');
         const curr = perSong.get(songKey) || {
           title: data.title || '',
@@ -481,7 +488,7 @@ function computeRadarProfileFromProgress(progress) {
     if (notes <= 0 || ex <= 0) return;
     const full = notes * 2;
     if (full <= 0) return;
-    const rateRatio = truncate2((ex / full) * 100) / 100;
+    const rateRatio = radarScoreRatio(ex, full);
     const songKey = titleKey(meta.title || '');
     const curr = perSong.get(songKey) || {
       title: meta.title || '',
@@ -1132,7 +1139,6 @@ function normalizeSettings(s) {
   return {
     showUpdateGoalCards: src.showUpdateGoalCards !== false,
     enableHistoryRollback: src.enableHistoryRollback !== false,
-    noteRadarHudEnabled: src.noteRadarHudEnabled !== false,
     discoverability: src.discoverability === 'hidden' ? 'hidden' : 'searchable',
     discoverByDjName: src.discoverByDjName !== false,
     followPolicy: ['auto', 'manual', 'disabled'].includes(src.followPolicy) ? src.followPolicy : 'manual',
@@ -1259,6 +1265,34 @@ function findRowByTitle(indexes, title) {
   return null;
 }
 
+function buildSongRadarCatalogIndex(catalog) {
+  const idx = new Map();
+  const idxLoose = new Map();
+  const idxAscii = new Map();
+  (catalog?.charts || []).forEach((row) => {
+    const title = String(row?.title || '').trim();
+    const type = String(row?.type || '').trim().toUpperCase();
+    if (!title || !/^[BNHAL]$/.test(type)) return;
+    const tk = `${titleKey(title)}|${type}`;
+    const lk = `${looseTitle(title)}|${type}`;
+    const ak = `${foldedAsciiTitle(title)}|${type}`;
+    if (!idx.has(tk)) idx.set(tk, row);
+    if (looseTitle(title) && !idxLoose.has(lk)) idxLoose.set(lk, row);
+    if (foldedAsciiTitle(title) && !idxAscii.has(ak)) idxAscii.set(ak, row);
+  });
+  return { idx, idxLoose, idxAscii };
+}
+
+function findSongRadarCatalogEntry(catalog, title, type) {
+  const c = String(type || 'A').trim().toUpperCase();
+  if (!catalog || !/^[BNHAL]$/.test(c)) return null;
+  const indexes = catalog._indexes || (catalog._indexes = buildSongRadarCatalogIndex(catalog));
+  const tk = `${titleKey(title)}|${c}`;
+  const lk = `${looseTitle(title)}|${c}`;
+  const ak = `${foldedAsciiTitle(title)}|${c}`;
+  return indexes.idx.get(tk) || indexes.idxLoose.get(lk) || indexes.idxAscii.get(ak) || null;
+}
+
 function buildViews() {
   const acc = activeAcc();
   const rows = acc?.trackerRows || [];
@@ -1341,8 +1375,17 @@ function buildViews() {
             metaNotes: 0,
             metaType: '',
             cpiHc: 0,
-            cpiEx: 0
+            cpiEx: 0,
+            radar: null,
+            radarTop: ''
           };
+          const fallbackRadar = findSongRadarCatalogEntry(state.songRadarCatalog, row.title, type);
+          if (fallbackRadar) {
+            chart.radar = fallbackRadar.radar || null;
+            chart.radarTop = fallbackRadar.radarTop || '';
+            chart.metaNotes = Number(fallbackRadar.notes || 0);
+            if (!chart.metaType && chart.radarTop) chart.metaType = chart.radarTop;
+          }
           uncategorized.push(chart);
           flatCharts.push(chart);
           matchedRowType.add(rowTypeKey);
@@ -1929,8 +1972,6 @@ function renderSettings() {
   const discoverability = $('settingDiscoverability');
   if (show) show.checked = !!state.settings.showUpdateGoalCards;
   if (rb) rb.checked = !!state.settings.enableHistoryRollback;
-  const hud = $('settingNoteRadarHudEnabled');
-  if (hud) hud.checked = !!state.settings.noteRadarHudEnabled;
   if (discoverability) discoverability.checked = state.settings.discoverability !== 'hidden';
   $('settingDiscoverabilityDjName').checked = state.settings.discoverByDjName !== false;
   $('settingFollowPolicyManual').checked = state.settings.followPolicy === 'manual';
@@ -3561,12 +3602,9 @@ async function showSongPopup(chart,e){
     ? `<button type="button" class="song-goal-open-btn" data-song-goal="${esc(chart.key)}">목표 설정</button>`
     : '';
   $('popupTitle').innerHTML=`<span>${esc(`${chart.title} [${chart.type}]`)}</span>${goalBtn}`;
-  const bpmText = chart.bpm ? esc(chart.bpm) : '-';
   const metaNotes = Number(chart.metaNotes || 0) > 0 ? Number(chart.metaNotes) : '-';
   const typeText = chart.metaType ? esc(chart.metaType) : '-';
-  const cpiHcText = Number(chart.cpiHc || 0) > 0 ? Number(chart.cpiHc).toFixed(2) : '-';
-  const cpiExText = Number(chart.cpiEx || 0) > 0 ? Number(chart.cpiEx).toFixed(2) : '-';
-  const infoHtml = `<div>BPM: ${bpmText} | notes: ${metaNotes} | Type: ${typeText} | CPI(HC): ${cpiHcText} | CPI(EX): ${cpiExText}</div>`;
+  const infoHtml = `<div>notes: ${metaNotes} | Type: ${typeText}</div>`;
   const playHtml = `<div>Lamp: ${esc(chart.clearStatus)} | Rank: ${esc(chart.scoreTier||'-')}</div><div>SCORE: ${chart.exScore} | MISS: ${chart.missCount}</div><div>RATE: ${chart.rate.toFixed(2)}%</div>`;
   const radarData = normalizeRadarData(chart.radar);
   const dominantAxis = chart.radarTop || (radarData ? dominantRadarAxis(radarData) : '');
@@ -4180,6 +4218,22 @@ async function startRefluxUpdate() {
   if (ensured.updated) appendRefluxStatus(`Reflux ${ensured.latestTag}로 업데이트했습니다.`);
   else if (ensured.upToDate && ensured.latestTag) appendRefluxStatus(`Reflux 최신 버전(${ensured.latestTag})이 준비되어 있습니다.`);
   else appendRefluxStatus('Reflux를 준비했습니다.');
+
+  const radarCatalog = ensured?.radarCatalog || null;
+  if (radarCatalog) {
+    if (!radarCatalog.ok) {
+      appendRefluxStatus(`악곡 노트 레이더 카탈로그 준비 실패: ${radarCatalog.error || 'unknown_error'}`);
+      toast('악곡 노트 레이더 카탈로그 준비에 실패했습니다.', 'error');
+      state.refluxRunning = false;
+      clearRefluxGoalCards();
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
+    appendRefluxStatus('악곡 노트 레이더 카탈로그 사용: 패키징 CSV');
+    if (radarCatalog.catalogVersion) {
+      appendRefluxStatus(`노트 레이더 카탈로그 버전: ${radarCatalog.catalogVersion}`);
+    }
+  }
   if (ensured.exePath) {
     state.refluxExePath = ensured.exePath;
     await saveState();
@@ -4187,8 +4241,7 @@ async function startRefluxUpdate() {
   appendRefluxStatus('갱신을 시작합니다. 이 프로그램을 실행한 채로 IIDX INFINITAS를 플레이해주세요.');
   if (!dialog.open) dialog.showModal();
   await window.electronAPI.startReflux({
-    exePath: ensured.exePath || state.refluxExePath || '',
-    noteRadarHudEnabled: !!state.settings.noteRadarHudEnabled
+    exePath: ensured.exePath || state.refluxExePath || ''
   });
 }
 
@@ -4208,7 +4261,32 @@ async function extractCurrentTsv() {
   if (out?.saved) toast('TSV 추출 완료', 'success');
 }
 
-async function loadTablesFromCache(){ state.rankTables=await window.electronAPI.getRankTables(); refreshAll(); }
+async function loadTablesFromCache(){
+  const [tables, songRadarCatalog] = await Promise.all([
+    window.electronAPI.getRankTables(),
+    window.electronAPI.getSongRadarCatalog()
+  ]);
+  state.rankTables = tables || {};
+  state.songRadarCatalog = songRadarCatalog || null;
+  refreshAll();
+}
+
+async function reloadSongRadarCatalog(reason = 'changed') {
+  try {
+    const [tables, songRadarCatalog] = await Promise.all([
+      window.electronAPI.getRankTables(),
+      window.electronAPI.getSongRadarCatalog()
+    ]);
+    state.rankTables = tables || {};
+    state.songRadarCatalog = songRadarCatalog || null;
+    refreshAll();
+    if (reason === 'changed') {
+      toast('악곡 노트 레이더 CSV 변경을 반영했습니다.', 'info');
+    }
+  } catch (e) {
+    console.warn('song radar catalog reload failed', e);
+  }
+}
 function appendRefreshStatus(line) {
   const host = $('refreshStatusLog');
   if (!host) return;
@@ -4230,7 +4308,12 @@ async function refreshTables(){
   if (!dialog.open) dialog.showModal();
   try {
     appendRefreshStatus('갱신 시작...');
-    state.rankTables = await window.electronAPI.refreshRankTables();
+    const [tables, songRadarCatalog] = await Promise.all([
+      window.electronAPI.refreshRankTables(),
+      window.electronAPI.getSongRadarCatalog()
+    ]);
+    state.rankTables = tables || {};
+    state.songRadarCatalog = songRadarCatalog || null;
     refreshAll();
     appendRefreshStatus('로컬 반영 완료');
     toast('서열표를 최신 데이터로 갱신했습니다.', 'success');
@@ -4288,6 +4371,13 @@ function setupEvents(){
         appendRefluxStatus('업데이트 완료! "갱신 완료" 버튼을 눌러 창을 닫아주세요.');
         renderRefluxGoalCards();
       }
+    }),
+    window.electronAPI.onSongRadarCatalogChanged(() => {
+      if (songRadarReloadTimer) clearTimeout(songRadarReloadTimer);
+      songRadarReloadTimer = setTimeout(() => {
+        songRadarReloadTimer = null;
+        reloadSongRadarCatalog('changed');
+      }, 300);
     })
   ];
 
@@ -4631,10 +4721,6 @@ function setupEvents(){
     state.settings.enableHistoryRollback = !!e.target.checked;
     await saveState();
     renderHistory();
-  });
-  $('settingNoteRadarHudEnabled').addEventListener('change', async (e) => {
-    state.settings.noteRadarHudEnabled = !!e.target.checked;
-    await saveState();
   });
   const applySocialSettings = async () => {
     state.settings.discoverability = $('settingDiscoverability')?.checked ? 'searchable' : 'hidden';
