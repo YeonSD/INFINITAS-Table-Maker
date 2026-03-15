@@ -3,10 +3,17 @@ dist/
 dist-portable/
 .tmp_reflux/
 Reflux.1.16.2/
+Reflux.1.16.3/
+Reflux.1.16.3_clean/
 *.log
 tmp_*.html
 *.tmp
 .DS_Store
 .omx/
 reports/
+note-radar-search/
+tools/
+music_index_tmp*.html
+.tmp_music_index.html
+tmp-tracker-1.tsv
 AGENTS.md
